@@ -26,26 +26,25 @@ export class StreamlikeClient {
 
   /**
    * Crée un média en encodant depuis `sourceUrl`. Les métadonnées partent dans
-   * le CORPS JSON (POST), pas en query-string. Sans binaire à joindre, l'URL
-   * source remplace `source[media_file]` via `source.url` (encode-from-URL).
+   * le CORPS de la requête (POST, x-www-form-urlencoded) sous forme de champs À
+   * PLAT en notation crochets — pas en query-string, pas de blob JSON. L'URL
+   * source remplace `source[media_file]` via `source[url]` (encode-from-URL).
    */
   createMedia(input: CreateMediaInput): Promise<any> {
-    const resource: Record<string, unknown> = {
-      name: input.name,
-      permalink: input.permalink,
-      type: input.type || 'video',
-      visibility: { state: 'online' },
-    };
-    if (input.sourceUrl) resource.source = { url: input.sourceUrl };
-    if (input.description) resource.description = input.description;
-    const tagIds = (input.tagIds || []).filter((t) => t != null).map(String);
-    if (tagIds.length) resource.tag_ids = tagIds;
-    if (input.playlistId != null) resource.playlists = [String(input.playlistId)];
+    const body = new URLSearchParams();
+    body.set('name', input.name);
+    body.set('permalink', input.permalink);
+    body.set('type', input.type || 'video');
+    body.set('visibility[state]', 'online');
+    if (input.sourceUrl) body.set('source[url]', input.sourceUrl);
+    if (input.description) body.set('description', input.description);
+    for (const t of input.tagIds || []) if (t != null) body.append('tag_ids[]', String(t));
+    if (input.playlistId != null) body.append('playlists[]', String(input.playlistId));
 
     return apiFetch(`${this.baseUrl}/medias`, {
       method: 'POST',
-      headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify(resource),
+      headers: { ...this.authHeaders(), 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
     }, 'streamlike/createMedia');
   }
 
