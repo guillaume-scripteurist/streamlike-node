@@ -25,26 +25,26 @@ export class StreamlikeClient {
   }
 
   /**
-   * Crée un média en encodant depuis `sourceUrl`. Les métadonnées partent dans
-   * le CORPS de la requête (POST, x-www-form-urlencoded) sous forme de champs À
-   * PLAT en notation crochets — pas en query-string, pas de blob JSON. L'URL
-   * source remplace `source[media_file]` via `source[url]` (encode-from-URL).
+   * Crée un média en encodant depuis `sourceUrl`. Sans binaire à joindre, on
+   * suit le format documenté de POST /medias : tous les paramètres en QUERY
+   * (name/permalink/type requis, `visibility`, `source`, `tag_ids[]`, `playlists[]`
+   * optionnels). `source` = l'URL MP4 (encode-from-URL, à la place du binaire
+   * `source[media_file]` du multipart).
    */
   createMedia(input: CreateMediaInput): Promise<any> {
-    const body = new URLSearchParams();
-    body.set('name', input.name);
-    body.set('permalink', input.permalink);
-    body.set('type', input.type || 'video');
-    body.set('visibility[state]', 'online');
-    if (input.sourceUrl) body.set('source[url]', input.sourceUrl);
-    if (input.description) body.set('description', input.description);
-    for (const t of input.tagIds || []) if (t != null) body.append('tag_ids[]', String(t));
-    if (input.playlistId != null) body.append('playlists[]', String(input.playlistId));
+    const params = new URLSearchParams();
+    params.set('name', input.name);
+    params.set('permalink', input.permalink);
+    params.set('type', input.type || 'video');
+    params.set('visibility', 'online');
+    if (input.sourceUrl) params.set('source', input.sourceUrl);
+    if (input.description) params.set('description', input.description);
+    for (const t of input.tagIds || []) if (t != null) params.append('tag_ids[]', String(t));
+    if (input.playlistId != null) params.append('playlists[]', String(input.playlistId));
 
-    return apiFetch(`${this.baseUrl}/medias`, {
+    return apiFetch(`${this.baseUrl}/medias?${params.toString()}`, {
       method: 'POST',
-      headers: { ...this.authHeaders(), 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
+      headers: this.authHeaders(),
     }, 'streamlike/createMedia');
   }
 
