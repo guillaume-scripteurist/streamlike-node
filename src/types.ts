@@ -12,6 +12,16 @@ export interface StreamlikeConfig {
   apiToken: string;
   /** Base d'API (défaut https://api.streamlike.com). */
   baseUrl?: string;
+  /**
+   * Chemin de création d'une playlist, relatif à `baseUrl`.
+   *
+   * L'OpenAPI publié ne documente pas la gestion des playlists (seulement leur
+   * usage comme `playlists[]` sur un média). On applique donc par défaut la
+   * symétrie observée avec les tags — `POST /organization/tags?name=` —, et on
+   * laisse le chemin surchargeable pour corriger sans toucher au code, comme
+   * c'est déjà le cas pour l'URL du player.
+   */
+  playlistPath?: string;
 }
 
 export interface SignUploadInput {
@@ -39,7 +49,10 @@ export interface CreateMediaInput {
   sourceUrl?: string;
   type?: string;
   tagIds?: Array<string | number>;
+  /** Playlist unique (compat historique). Fusionnée avec `playlistIds`. */
   playlistId?: string | number;
+  /** Playlists multiples : session, joueur, question… */
+  playlistIds?: Array<string | number>;
   description?: string;
 }
 

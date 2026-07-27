@@ -40,7 +40,13 @@ export class StreamlikeClient {
     if (input.sourceUrl) params.set('source', input.sourceUrl);
     if (input.description) params.set('description', input.description);
     for (const t of input.tagIds || []) if (t != null) params.append('tag_ids[]', String(t));
-    if (input.playlistId != null) params.append('playlists[]', String(input.playlistId));
+    // Un média peut appartenir à plusieurs playlists (session, joueur,
+    // question). On déduplique : la même playlist envoyée deux fois est au
+    // mieux inutile, au pire refusée.
+    const playlists = [...(input.playlistIds || []), input.playlistId]
+      .filter((p): p is string | number => p != null && p !== '')
+      .map(String);
+    for (const p of [...new Set(playlists)]) params.append('playlists[]', p);
 
     return apiFetch(`${this.baseUrl}/medias?${params.toString()}`, {
       method: 'POST',
@@ -71,6 +77,24 @@ export class StreamlikeClient {
       'streamlike/createTag',
     );
     return created?.id ?? created?.tag_id ?? created?.permalink ?? null;
+  }
+
+  /**
+   * Crée une playlist et renvoie son identifiant.
+   *
+   * Même forme que {@link ensureTag} : les métadonnées passent en query, la
+   * réponse expose l'id sous l'une des clés usuelles de l'API. Le chemin est
+   * surchargeable (`config.playlistPath`) car il n'est pas documenté dans
+   * l'OpenAPI publié.
+   */
+  async createPlaylist(name: string): Promise<string | number | null> {
+    const p = (this.config.playlistPath || '/organization/playlists').replace(/^\/?/, '/');
+    const created = await apiFetch(
+      `${this.baseUrl}${p}?name=${encodeURIComponent(name)}`,
+      { method: 'POST', headers: this.authHeaders() },
+      'streamlike/createPlaylist',
+    );
+    return created?.id ?? created?.playlist_id ?? created?.permalink ?? null;
   }
 
   /** Crée un token de lecture (player protégé). */
