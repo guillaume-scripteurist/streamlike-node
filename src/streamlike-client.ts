@@ -144,6 +144,24 @@ export class StreamlikeClient {
     return created?.id ?? created?.playlist_id ?? created?.permalink ?? null;
   }
 
+  /**
+   * Cherche des playlists par nom (`GET /organization/playlists?search=`).
+   *
+   * Sert à retrouver une playlist déjà créée plutôt qu'à en empiler une
+   * nouvelle : le cache du serveur de jeu vit en mémoire, donc un redémarrage
+   * en pleine soirée recréerait sinon « Joueur — Marie » une seconde fois.
+   */
+  async searchPlaylists(name: string): Promise<Array<{ id: string; name: string }>> {
+    const params = new URLSearchParams({ search: name, fields: 'id,name' });
+    const body = await apiFetch(
+      `${this.baseUrl}/organization/playlists?${params.toString()}`,
+      { method: 'GET', headers: this.authHeaders() },
+      'streamlike/searchPlaylists',
+    );
+    const rows = Array.isArray(body?.data) ? body.data : (Array.isArray(body) ? body : []);
+    return rows.filter((r: any) => r && r.id);
+  }
+
   /** Crée un token de lecture (player protégé). */
   createPlaybackToken(
     mediaId: string,
