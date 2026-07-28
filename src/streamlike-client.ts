@@ -2,6 +2,7 @@ import { apiFetch } from './http';
 import type {
   StreamlikeConfig,
   CreateMediaInput,
+  UploadMediaInput,
   EncodingStatusResult,
   PollEncodingOptions,
   PollHandle,
@@ -52,6 +53,52 @@ export class StreamlikeClient {
       method: 'POST',
       headers: this.authHeaders(),
     }, 'streamlike/createMedia');
+  }
+
+  /**
+   * Crée un média en ENVOYANT le fichier (multipart), sans passer par une URL
+   * source. C'est la voie utilisable quand on détient le binaire localement et
+   * qu'on n'a pas d'URL publique à donner à Streamlike — typiquement un kiosque
+   * posé dans une salle.
+   *
+   * Format validé sur un appel réel (201). Trois pièges, tous silencieux :
+   *  1. TOUT passe dans le payload. Les paramètres mis en query sont IGNORÉS
+   *     dès qu'il y a un corps multipart, et l'API répond `MANDATORY_*`.
+   *  2. Le champ fichier est `source[encode][media_file]`. `source[media_file]`,
+   *     montré dans la doc officielle, est rejeté en `UNKNOWN_FIELDS`.
+   *  3. `resource` doit être appendé comme CHAÎNE. En Blob, le multipart porte
+   *     un `filename`, l'API le prend pour un fichier -> `UNKNOWN_FIELDS`.
+   */
+  uploadMedia(input: UploadMediaInput): Promise<any> {
+    const resource: Record<string, unknown> = {
+      name: input.name,
+      permalink: input.permalink,
+      type: input.type || 'video',
+      visibility: { state: 'online' },
+    };
+    if (input.description) resource.description = input.description;
+    const tags = (input.tagIds || []).filter(t => t != null && t !== '').map(String);
+    if (tags.length) resource.tag_ids = tags;
+    const playlists = [...new Set((input.playlistIds || []).filter(p => p != null && p !== '').map(String))];
+    if (playlists.length) resource.playlists = playlists;
+
+    const body = new FormData();
+    body.append('resource', JSON.stringify(resource)); // chaîne, surtout pas un Blob
+    const blob = input.file instanceof Blob
+      ? input.file
+      // Le cast contourne le typage strict de BlobPart en TS 5.9 : un
+      // `Uint8Array<ArrayBufferLike>` pourrait théoriquement porter un
+      // SharedArrayBuffer, ce qui n'arrive pas ici (Buffer de fs.readFile).
+      : new Blob([input.file as unknown as BlobPart], { type: input.contentType || 'video/mp4' });
+    body.append('source[encode][media_file]', blob, input.filename);
+
+    // Pas de Content-Type explicite : fetch doit poser lui-même la frontière
+    // (`boundary=…`) du multipart.
+    return apiFetch(`${this.baseUrl}/medias`, {
+      method: 'POST',
+      headers: this.authHeaders(),
+      body,
+    }, 'streamlike/uploadMedia');
   }
 
   /** Lit et normalise le statut d'encodage d'un média. */

@@ -56,6 +56,21 @@ export interface CreateMediaInput {
   description?: string;
 }
 
+export interface UploadMediaInput {
+  /** Contenu du fichier. `Blob` (voir `fs.openAsBlob`) ou `Buffer`/`Uint8Array`. */
+  file: Blob | Uint8Array;
+  /** Nom de fichier transmis dans le multipart (l'extension compte). */
+  filename: string;
+  name: string;
+  permalink: string;
+  type?: string;
+  description?: string;
+  tagIds?: Array<string | number>;
+  playlistIds?: Array<string | number>;
+  /** Type MIME, si `file` n'est pas déjà un Blob typé. */
+  contentType?: string;
+}
+
 export type EncodingStatus =
   | 'none' | 'pending' | 'running' | 'done' | 'error'
   | 'unknown' | 'polling_error' | 'timeout';
