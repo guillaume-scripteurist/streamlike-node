@@ -71,6 +71,34 @@ export interface UploadMediaInput {
   contentType?: string;
 }
 
+/** Filtres de `GET /medias`. Tous optionnels : sans rien, on liste tout. */
+export interface ListMediasInput {
+  /** Recherche plein texte (nom, description…). */
+  search?: string;
+  /** Index du premier élément (pagination `range=first-last`). */
+  offset?: number;
+  /** Nombre d'éléments demandés. L'API plafonne à sa propre limite. */
+  limit?: number;
+  /** Tri, forme `champ|asc` ou `champ|desc` (par défaut `created_at|desc`). */
+  sort?: string;
+  playlistIds?: Array<string | number>;
+  tagIds?: Array<string | number>;
+  /** `video` | `audio` | `live`. */
+  type?: string;
+  /** `online` | `offline` | `archived`. */
+  visibility?: string;
+  /** Ne garder que les médias encodés (donc réellement diffusables). */
+  encoded?: boolean;
+}
+
+export interface ListMediasResult {
+  items: any[];
+  /** Total côté serveur — sert à savoir s'il reste des pages. */
+  total: number;
+  offset: number;
+  limit: number;
+}
+
 export type EncodingStatus =
   | 'none' | 'pending' | 'running' | 'done' | 'error'
   | 'unknown' | 'polling_error' | 'timeout';

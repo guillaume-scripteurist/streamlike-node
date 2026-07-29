@@ -4,6 +4,8 @@ import type {
   CreateMediaInput,
   UploadMediaInput,
   EncodingStatusResult,
+  ListMediasInput,
+  ListMediasResult,
   PollEncodingOptions,
   PollHandle,
 } from './types';
@@ -99,6 +101,61 @@ export class StreamlikeClient {
       headers: this.authHeaders(),
       body,
     }, 'streamlike/uploadMedia');
+  }
+
+  /**
+   * Liste les médias du compte (`GET /medias`).
+   *
+   * La pagination de Streamlike s'exprime en `range=premier-dernier` et non en
+   * page/taille : on traduit ici depuis `offset`/`limit`, plus naturels côté
+   * appelant. La réponse expose `total_count`, ce qui permet à une console de
+   * savoir s'il reste des pages sans avoir à en demander une de trop.
+   */
+  async listMedias(input: ListMediasInput = {}): Promise<ListMediasResult> {
+    const offset = Math.max(0, Math.floor(input.offset ?? 0));
+    const limit = Math.max(1, Math.floor(input.limit ?? 50));
+    const params = new URLSearchParams();
+    params.set('range', `${offset}-${offset + limit - 1}`);
+    params.set('sorts', input.sort || 'created_at|desc');
+    if (input.search) params.set('search', input.search);
+    if (input.type) params.set('type', input.type);
+    if (input.visibility) params.set('visibility.state', input.visibility);
+    if (input.encoded != null) params.set('encoded', input.encoded ? 'true' : 'false');
+    for (const p of input.playlistIds || []) if (p != null && p !== '') params.append('playlist_ids[]', String(p));
+    for (const t of input.tagIds || []) if (t != null && t !== '') params.append('tag_ids[]', String(t));
+
+    const body = await apiFetch(`${this.baseUrl}/medias?${params.toString()}`, {
+      method: 'GET',
+      headers: this.authHeaders(),
+    }, 'streamlike/listMedias');
+
+    // L'API répond `{ data, total_count }` en 200/206 ; on tolère un tableau nu
+    // au cas où une version renverrait directement la collection.
+    const items = Array.isArray(body?.data) ? body.data : (Array.isArray(body) ? body : []);
+    const total = Number(body?.total_count ?? items.length) || items.length;
+    return { items, total, offset, limit };
+  }
+
+  /**
+   * Liste les playlists de l'organisation (`GET /organization/playlists`).
+   * Même service que {@link searchPlaylists}, mais sans filtre de nom et avec
+   * la pagination : sert à peupler un sélecteur de playlists.
+   */
+  async listPlaylists(input: { search?: string; offset?: number; limit?: number } = {}): Promise<Array<{ id: string; name: string }>> {
+    const offset = Math.max(0, Math.floor(input.offset ?? 0));
+    const limit = Math.max(1, Math.floor(input.limit ?? 100));
+    const params = new URLSearchParams({
+      range: `${offset}-${offset + limit - 1}`,
+      fields: 'id,name',
+    });
+    if (input.search) params.set('search', input.search);
+    const body = await apiFetch(
+      `${this.baseUrl}/organization/playlists?${params.toString()}`,
+      { method: 'GET', headers: this.authHeaders() },
+      'streamlike/listPlaylists',
+    );
+    const rows = Array.isArray(body?.data) ? body.data : (Array.isArray(body) ? body : []);
+    return rows.filter((r: any) => r && r.id);
   }
 
   /** Lit et normalise le statut d'encodage d'un média. */
