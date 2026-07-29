@@ -28,32 +28,40 @@ export class StreamlikeClient {
   }
 
   /**
-   * Crée un média en encodant depuis `sourceUrl`. Sans binaire à joindre, on
-   * suit le format documenté de POST /medias : tous les paramètres en QUERY
-   * (name/permalink/type requis, `visibility`, `source`, `tag_ids[]`, `playlists[]`
-   * optionnels). `source` = l'URL MP4 (encode-from-URL, à la place du binaire
-   * `source[media_file]` du multipart).
+   * Crée un média en encodant depuis `sourceUrl` (sans binaire à joindre).
+   *
+   * L'OpenAPI publié documente ces paramètres en QUERY, mais un appel réel a
+   * montré l'API refuser cette forme (`INVALID_FORM`/`UNKNOWN_FIELDS`) — sur ce
+   * point la doc ment. La forme qui fonctionne est un corps JSON :
+   * `{name, permalink, type, visibility:{state}, source, description, tag_ids,
+   * playlists}`. `source` = l'URL MP4 (encode-from-URL, à la place du binaire
+   * `source[media_file]` du multipart de {@link uploadMedia}).
    */
   createMedia(input: CreateMediaInput): Promise<any> {
-    const params = new URLSearchParams();
-    params.set('name', input.name);
-    params.set('permalink', input.permalink);
-    params.set('type', input.type || 'video');
-    params.set('visibility', 'online');
-    if (input.sourceUrl) params.set('source', input.sourceUrl);
-    if (input.description) params.set('description', input.description);
-    for (const t of input.tagIds || []) if (t != null) params.append('tag_ids[]', String(t));
+    const payload: Record<string, unknown> = {
+      name: input.name,
+      permalink: input.permalink,
+      type: input.type || 'video',
+      visibility: { state: 'online' },
+    };
+    if (input.sourceUrl) payload.source = input.sourceUrl;
+    if (input.description) payload.description = input.description;
+    const tagIds = (input.tagIds || []).filter(t => t != null);
+    if (tagIds.length) payload.tag_ids = tagIds;
     // Un média peut appartenir à plusieurs playlists (session, joueur,
     // question). On déduplique : la même playlist envoyée deux fois est au
     // mieux inutile, au pire refusée.
-    const playlists = [...(input.playlistIds || []), input.playlistId]
-      .filter((p): p is string | number => p != null && p !== '')
-      .map(String);
-    for (const p of [...new Set(playlists)]) params.append('playlists[]', p);
+    const playlists = [...new Set(
+      [...(input.playlistIds || []), input.playlistId]
+        .filter((p): p is string | number => p != null && p !== '')
+        .map(String),
+    )];
+    if (playlists.length) payload.playlists = playlists;
 
-    return apiFetch(`${this.baseUrl}/medias?${params.toString()}`, {
+    return apiFetch(`${this.baseUrl}/medias`, {
       method: 'POST',
-      headers: this.authHeaders(),
+      headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     }, 'streamlike/createMedia');
   }
 
@@ -176,8 +184,12 @@ export class StreamlikeClient {
   /** Crée un tag (idempotent côté usage) et renvoie son identifiant. */
   async ensureTag(name: string): Promise<string | number | null> {
     const created = await apiFetch(
-      `${this.baseUrl}/organization/tags?name=${encodeURIComponent(name)}`,
-      { method: 'POST', headers: this.authHeaders() },
+      `${this.baseUrl}/organization/tags`,
+      {
+        method: 'POST',
+        headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      },
       'streamlike/createTag',
     );
     return created?.id ?? created?.tag_id ?? created?.permalink ?? null;
@@ -186,16 +198,23 @@ export class StreamlikeClient {
   /**
    * Crée une playlist et renvoie son identifiant.
    *
-   * Même forme que {@link ensureTag} : les métadonnées passent en query, la
+   * Même forme que {@link ensureTag} : les métadonnées passent en corps JSON
+   * (et non en query, malgré l'OpenAPI publié — voir {@link createMedia}), la
    * réponse expose l'id sous l'une des clés usuelles de l'API. Le chemin est
    * surchargeable (`config.playlistPath`) car il n'est pas documenté dans
    * l'OpenAPI publié.
    */
-  async createPlaylist(name: string): Promise<string | number | null> {
+  async createPlaylist(name: string, description: string = ''): Promise<string | number | null> {
     const p = (this.config.playlistPath || '/organization/playlists').replace(/^\/?/, '/');
+    const payload: Record<string, unknown> = { name };
+    if (description) payload.description = description;
     const created = await apiFetch(
-      `${this.baseUrl}${p}?name=${encodeURIComponent(name)}`,
-      { method: 'POST', headers: this.authHeaders() },
+      `${this.baseUrl}${p}`,
+      {
+        method: 'POST',
+        headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
       'streamlike/createPlaylist',
     );
     return created?.id ?? created?.playlist_id ?? created?.permalink ?? null;
@@ -224,14 +243,18 @@ export class StreamlikeClient {
     mediaId: string,
     opts: { expireAt: string; ip?: string; userAgent?: string },
   ): Promise<any> {
-    const params = new URLSearchParams({
+    const payload = {
       expire_at: opts.expireAt,
       ip: opts.ip || '0.0.0.0',
       user_agent: opts.userAgent || 'secure-upload-player',
-    });
+    };
     return apiFetch(
-      `${this.baseUrl}/medias/${encodeURIComponent(mediaId)}/token?${params.toString()}`,
-      { method: 'POST', headers: this.authHeaders() },
+      `${this.baseUrl}/medias/${encodeURIComponent(mediaId)}/token`,
+      {
+        method: 'POST',
+        headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
       'streamlike/token',
     );
   }
