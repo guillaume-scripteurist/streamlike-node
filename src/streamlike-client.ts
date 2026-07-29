@@ -154,7 +154,6 @@ export class StreamlikeClient {
     const limit = Math.max(1, Math.floor(input.limit ?? 100));
     const params = new URLSearchParams({
       range: `${offset}-${offset + limit - 1}`,
-      fields: 'id,name',
     });
     if (input.search) params.set('search', input.search);
     const body = await apiFetch(
@@ -228,7 +227,7 @@ export class StreamlikeClient {
    * en pleine soirée recréerait sinon « Joueur — Marie » une seconde fois.
    */
   async searchPlaylists(name: string): Promise<Array<{ id: string; name: string }>> {
-    const params = new URLSearchParams({ search: name, fields: 'id,name' });
+    const params = new URLSearchParams({ search: name });
     const body = await apiFetch(
       `${this.baseUrl}/organization/playlists?${params.toString()}`,
       { method: 'GET', headers: this.authHeaders() },
