@@ -90,7 +90,7 @@ export class StreamlikeClient {
     const tags = (input.tagIds || []).filter(t => t != null && t !== '').map(String);
     if (tags.length) resource.tag_ids = tags;
     const playlists = [...new Set((input.playlistIds || []).filter(p => p != null && p !== '').map(String))];
-    if (playlists.length) resource.playlists = playlists;
+    if (playlists.length) resource.playlists = playlists.map((id, index) => ({ id, position: index + 1 }));
 
     const body = new FormData();
     body.append('resource', JSON.stringify(resource)); // chaîne, surtout pas un Blob
