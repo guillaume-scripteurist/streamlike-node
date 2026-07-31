@@ -49,8 +49,8 @@ export class StreamlikeClient {
 
     if (input.pseudo || input.alias) {
       payload.customs = [
-        ...(input.pseudo ? [{ name: 'PSEUDO', value: input.pseudo, public: true }] : []),
-        ...(input.alias ? [{ name: 'ALIAS', value: input.alias, public: true }] : []),
+        ...(input.pseudo ? [{ name: 'pseudo', value: input.pseudo, public: true }] : []),
+        ...(input.alias ? [{ name: 'alias', value: input.alias, public: true }] : []),
       ];
     }
     const tagIds = (input.tagIds || []).filter(t => t != null);
@@ -108,8 +108,8 @@ export class StreamlikeClient {
     if (input.description) resource.description = input.description;
     if (input.pseudo || input.alias) {
       resource.customs = [
-        ...(input.pseudo ? [{ name: 'PSEUDO', value: input.pseudo, public: true }] : []),
-        ...(input.alias ? [{ name: 'ALIAS', value: input.alias, public: true }] : []),
+        ...(input.pseudo ? [{ name: 'pseudo', value: input.pseudo, public: true }] : []),
+        ...(input.alias ? [{ name: 'alias', value: input.alias, public: true }] : []),
       ];
     }
     const tags = (input.tagIds || []).filter(t => t != null && t !== '').map(String);
@@ -259,19 +259,19 @@ export class StreamlikeClient {
   }
 
   /**
-   * Édite les champs personnalisés d'un média (PSEUDO et ALIAS).
+   * Édite les champs personnalisés d'un média (pseudo et alias).
    */
   async updateMediaCustoms(mediaId: string, pseudo: string, alias: string): Promise<any> {
     const customs = [];
-    if (pseudo != null) customs.push({ name: 'PSEUDO', value: pseudo,public:true });
-    if (alias != null) customs.push({ name: 'ALIAS', value: alias,public:true });
+    if (pseudo != null) customs.push({ name: 'pseudo', value: pseudo,public:true });
+    if (alias != null) customs.push({ name: 'alias', value: alias,public:true });
     
     return apiFetch(
       `${this.baseUrl}/medias/${encodeURIComponent(mediaId)}`,
       {
         method: 'PATCH',
         headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customs,customs_merge:true }),
+        body: JSON.stringify({ customs, customs_merge: true }),
       },
       'streamlike/updateMediaCustoms',
     );
