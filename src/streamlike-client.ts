@@ -58,6 +58,18 @@ export class StreamlikeClient {
     )];
     if (playlists.length) payload.playlists = playlists;
 
+    // Transcription à l'encodage : `source` reste la CHAÎNE validée ci-dessus
+    // (impossible d'y imbriquer `encode.speech_to_text` sans la transformer en
+    // objet, ce qui casserait la forme éprouvée) — on reprend donc les mêmes
+    // clés en notation à crochets que {@link uploadMedia} (confirmées sur un
+    // appel réel côté multipart), mais comme clés JSON à plat. Non encore
+    // vérifié côté JSON : à confirmer sur un appel réel.
+    if (input.speechToText) {
+      payload['source[encode][speech_to_text][type]'] = 'subtitle';
+      payload['source[encode][speech_to_text][automatic_translation]'] = 'true';
+      payload['source[encode][speech_to_text][language]'] = input.speechToText;
+    }
+
     return apiFetch(`${this.baseUrl}/medias`, {
       method: 'POST',
       headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
@@ -101,6 +113,12 @@ export class StreamlikeClient {
       // SharedArrayBuffer, ce qui n'arrive pas ici (Buffer de fs.readFile).
       : new Blob([input.file as unknown as BlobPart], { type: input.contentType || 'video/mp4' });
     body.append('source[encode][media_file]', blob, input.filename);
+    // Passthru : la source est déjà dans un format lisible tel quel, inutile
+    // de la ré-encoder — accélère la disponibilité de la vidéo après upload.
+    body.append('source[encode][encoding_passthru]', '1');
+    body.append('source[encode][speech_to_text][type]', 'subtitle');
+    body.append('source[encode][speech_to_text][automatic_translation]', 'true');
+    body.append('source[encode][speech_to_text][language]', 'fr');
 
     // Pas de Content-Type explicite : fetch doit poser lui-même la frontière
     // (`boundary=…`) du multipart.
@@ -163,6 +181,67 @@ export class StreamlikeClient {
     );
     const rows = Array.isArray(body?.data) ? body.data : (Array.isArray(body) ? body : []);
     return rows.filter((r: any) => r && r.id);
+  }
+
+  /**
+   * Liste les vues de l'organisation (`GET /organization/views`).
+   * Une vue est un regroupement de playlists distinct de la playlist
+   * elle-même — {@link addPlaylistToView} sert à y rattacher une playlist.
+   */
+  async listViews(): Promise<Array<{ id: string; name: string }>> {
+    const body = await apiFetch(
+      `${this.baseUrl}/organization/views?range=0-99`,
+      { method: 'GET', headers: this.authHeaders() },
+      'streamlike/listViews',
+    );
+    const rows = Array.isArray(body?.data) ? body.data : (Array.isArray(body) ? body : []);
+    return rows.filter((r: any) => r && r.id);
+  }
+
+  /**
+   * Rattache une playlist à une vue.
+   *
+   * Il n'existe pas d'endpoint additif : une vue POSSÈDE sa liste de
+   * playlists (`playlists: string[]`), et `PATCH /organization/views/{id}`
+   * REMPLACE tout le tableau. On fait donc une lecture-modification-écriture :
+   * lire la vue, ajouter l'id s'il n'y est pas déjà, réécrire le tableau
+   * complet. Idempotent (no-op si la playlist y figure déjà) — l'appelant
+   * est responsable de sérialiser les appels concurrents sur une même vue
+   * (deux lecture-modification-écriture en parallèle pourraient s'écraser).
+   */
+  async addPlaylistToView(viewId: string, playlistId: string): Promise<void> {
+    const view = await apiFetch(
+      `${this.baseUrl}/organization/views/${encodeURIComponent(viewId)}`,
+      { method: 'GET', headers: this.authHeaders() },
+      'streamlike/getView',
+    );
+    const current = (Array.isArray(view?.playlists) ? view.playlists : []).map((p: any) => String(p.id));
+    if (current.includes(String(playlistId))) return;
+    await apiFetch(
+      `${this.baseUrl}/organization/views/${encodeURIComponent(viewId)}`,
+      {
+        method: 'PATCH',
+        headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playlists: [...current, String(playlistId)] }),
+      },
+      'streamlike/patchView',
+    );
+  }
+
+  /**
+   * Édite le crédit affiché d'un média (`credits` — champ natif Streamlike,
+   * ex. « perdant aigri » affiché en surimpression sous le pseudo).
+   */
+  async updateMediaCredits(mediaId: string, credits: string): Promise<any> {
+    return apiFetch(
+      `${this.baseUrl}/medias/${encodeURIComponent(mediaId)}`,
+      {
+        method: 'PATCH',
+        headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credits }),
+      },
+      'streamlike/updateMediaCredits',
+    );
   }
 
   /** Lit et normalise le statut d'encodage d'un média. */

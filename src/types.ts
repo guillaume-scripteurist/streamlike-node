@@ -54,6 +54,8 @@ export interface CreateMediaInput {
   /** Playlists multiples : session, joueur, question… */
   playlistIds?: Array<string | number>;
   description?: string;
+  /** Code langue (ex. `fr`) : déclenche la transcription automatique à l'encodage. */
+  speechToText?: string;
 }
 
 export interface UploadMediaInput {
