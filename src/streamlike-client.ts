@@ -193,7 +193,10 @@ export class StreamlikeClient {
       'streamlike/listPlaylists',
     );
     const rows = Array.isArray(body?.data) ? body.data : (Array.isArray(body) ? body : []);
-    return rows.filter((r: any) => r && r.id);
+    return rows.filter((r: any) => r && r.id).map((r: any) => ({
+      id: String(r.id),
+      name: r.name || ''
+    }));
   }
 
   /**
@@ -215,6 +218,20 @@ export class StreamlikeClient {
     }));
   }
 
+  async getView(viewId: string): Promise<{ id: string; name: string; playlists: string[] }> {
+    const r = await apiFetch(
+      `${this.baseUrl}/organization/views/${encodeURIComponent(viewId)}`,
+      { method: 'GET', headers: this.authHeaders() },
+      'streamlike/getView',
+    );
+    if (!r || !r.id) throw new Error(`Vue non trouvée : ${viewId}`);
+    return {
+      id: String(r.id),
+      name: r.name || '',
+      playlists: (Array.isArray(r.playlists) ? r.playlists : []).map((p: any) => String(p.id))
+    };
+  }
+
   /**
    * Rattache une playlist à une vue.
    *
@@ -227,19 +244,15 @@ export class StreamlikeClient {
    * (deux lecture-modification-écriture en parallèle pourraient s'écraser).
    */
   async addPlaylistToView(viewId: string, playlistId: string): Promise<void> {
-    const view = await apiFetch(
-      `${this.baseUrl}/organization/views/${encodeURIComponent(viewId)}`,
-      { method: 'GET', headers: this.authHeaders() },
-      'streamlike/getView',
-    );
-    const current = (Array.isArray(view?.playlists) ? view.playlists : []).map((p: any) => String(p.id));
+    const view = await this.getView(viewId).catch(() => ({ playlists: [] as string[] }));
+    const current = view.playlists;
     if (current.includes(String(playlistId))) return;
     await apiFetch(
       `${this.baseUrl}/organization/views/${encodeURIComponent(viewId)}`,
       {
         method: 'PATCH',
         headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playlists: [...current, String(playlistId)] }),
+        body: JSON.stringify({ playlists: [...current, String(playlistId)].map(id => ({ id })) }),
       },
       'streamlike/patchView',
     );
