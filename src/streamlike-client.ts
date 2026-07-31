@@ -201,14 +201,18 @@ export class StreamlikeClient {
    * Une vue est un regroupement de playlists distinct de la playlist
    * elle-même — {@link addPlaylistToView} sert à y rattacher une playlist.
    */
-  async listViews(): Promise<Array<{ id: string; name: string }>> {
+  async listViews(): Promise<Array<{ id: string; name: string; playlists: string[] }>> {
     const body = await apiFetch(
       `${this.baseUrl}/organization/views?range=0-99`,
       { method: 'GET', headers: this.authHeaders() },
       'streamlike/listViews',
     );
     const rows = Array.isArray(body?.data) ? body.data : (Array.isArray(body) ? body : []);
-    return rows.filter((r: any) => r && r.id);
+    return rows.filter((r: any) => r && r.id).map((r: any) => ({
+      id: String(r.id),
+      name: r.name || '',
+      playlists: (Array.isArray(r.playlists) ? r.playlists : []).map((p: any) => String(p.id))
+    }));
   }
 
   /**
