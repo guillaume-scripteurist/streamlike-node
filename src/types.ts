@@ -56,6 +56,10 @@ export interface CreateMediaInput {
   description?: string;
   /** Code langue (ex. `fr`) : déclenche la transcription automatique à l'encodage. */
   speechToText?: string;
+  /** Champ personnalisé PSEUDO Streamlike */
+  pseudo?: string;
+  /** Champ personnalisé ALIAS Streamlike */
+  alias?: string;
 }
 
 export interface UploadMediaInput {
@@ -71,6 +75,10 @@ export interface UploadMediaInput {
   playlistIds?: Array<string | number>;
   /** Type MIME, si `file` n'est pas déjà un Blob typé. */
   contentType?: string;
+  /** Champ personnalisé PSEUDO Streamlike */
+  pseudo?: string;
+  /** Champ personnalisé ALIAS Streamlike */
+  alias?: string;
 }
 
 /** Filtres de `GET /medias`. Tous optionnels : sans rien, on liste tout. */

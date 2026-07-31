@@ -46,6 +46,13 @@ export class StreamlikeClient {
     };
     if (input.sourceUrl) payload.source = input.sourceUrl;
     if (input.description) payload.description = input.description;
+
+    if (input.pseudo || input.alias) {
+      payload.customs = [
+        ...(input.pseudo ? [{ name: 'PSEUDO', value: input.pseudo, public: true }] : []),
+        ...(input.alias ? [{ name: 'ALIAS', value: input.alias, public: true }] : []),
+      ];
+    }
     const tagIds = (input.tagIds || []).filter(t => t != null);
     if (tagIds.length) payload.tag_ids = tagIds;
     // Un média peut appartenir à plusieurs playlists (session, joueur,
@@ -99,6 +106,12 @@ export class StreamlikeClient {
       visibility: { state: 'online' },
     };
     if (input.description) resource.description = input.description;
+    if (input.pseudo || input.alias) {
+      resource.customs = [
+        ...(input.pseudo ? [{ name: 'PSEUDO', value: input.pseudo, public: true }] : []),
+        ...(input.alias ? [{ name: 'ALIAS', value: input.alias, public: true }] : []),
+      ];
+    }
     const tags = (input.tagIds || []).filter(t => t != null && t !== '').map(String);
     if (tags.length) resource.tag_ids = tags;
     const playlists = [...new Set((input.playlistIds || []).filter(p => p != null && p !== '').map(String))];
@@ -229,18 +242,21 @@ export class StreamlikeClient {
   }
 
   /**
-   * Édite le crédit affiché d'un média (`credits` — champ natif Streamlike,
-   * ex. « perdant aigri » affiché en surimpression sous le pseudo).
+   * Édite les champs personnalisés d'un média (PSEUDO et ALIAS).
    */
-  async updateMediaCredits(mediaId: string, credits: string): Promise<any> {
+  async updateMediaCustoms(mediaId: string, pseudo: string, alias: string): Promise<any> {
+    const customs = [];
+    if (pseudo != null) customs.push({ name: 'PSEUDO', value: pseudo,public:true });
+    if (alias != null) customs.push({ name: 'ALIAS', value: alias,public:true });
+    
     return apiFetch(
       `${this.baseUrl}/medias/${encodeURIComponent(mediaId)}`,
       {
         method: 'PATCH',
         headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credits }),
+        body: JSON.stringify({ customs,customs_merge:true }),
       },
-      'streamlike/updateMediaCredits',
+      'streamlike/updateMediaCustoms',
     );
   }
 
