@@ -72,7 +72,7 @@ export class StreamlikeClient {
     // appel réel côté multipart), mais comme clés JSON à plat. Non encore
     // vérifié côté JSON : à confirmer sur un appel réel.
     if (input.speechToText) {
-      payload['source[encode][speech_to_text][type]'] = 'subtitle';
+      payload['source[encode][speech_to_text][type]'] = 'subtitle_transcript';
       payload['source[encode][speech_to_text][automatic_translation]'] = 'true';
       payload['source[encode][speech_to_text][language]'] = input.speechToText;
     }
@@ -129,7 +129,7 @@ export class StreamlikeClient {
     // Passthru : la source est déjà dans un format lisible tel quel, inutile
     // de la ré-encoder — accélère la disponibilité de la vidéo après upload.
     body.append('source[encode][encoding_passthru]', '1');
-    body.append('source[encode][speech_to_text][type]', 'subtitle');
+    body.append('source[encode][speech_to_text][type]', 'subtitle_transcript');
     body.append('source[encode][speech_to_text][automatic_translation]', 'true');
     body.append('source[encode][speech_to_text][language]', 'fr');
 
