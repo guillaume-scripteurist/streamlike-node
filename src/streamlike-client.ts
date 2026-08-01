@@ -3,12 +3,98 @@ import type {
   StreamlikeConfig,
   CreateMediaInput,
   UploadMediaInput,
+  CustomField,
   EncodingStatusResult,
   ListMediasInput,
   ListMediasResult,
+  OrgRef,
+  PlaylistInput,
+  PlaylistRow,
   PollEncodingOptions,
   PollHandle,
+  ViewRow,
 } from './types';
+
+/**
+ * Champs personnalisés d'une playlist ou d'un média.
+ *
+ * L'API les renvoie tantôt en tableau `[{name, value, public}]`, tantôt en
+ * objet `{nom: valeur}` selon le point d'entrée ; les noms sont normalisés en
+ * minuscules parce que Streamlike les traite ainsi et qu'un `Duree` créé à la
+ * main dans le back-office doit être relu comme le `duree` que nous écrivons.
+ */
+function normalizeCustoms(raw: unknown): CustomField[] {
+  const rows = Array.isArray(raw)
+    ? raw
+    : (raw && typeof raw === 'object'
+      ? Object.entries(raw as Record<string, unknown>).map(([name, value]) => ({ name, value }))
+      : []);
+  return rows
+    .filter((c: any) => c && c.name)
+    .map((c: any) => ({
+      name: String(c.name).trim().toLowerCase(),
+      value: c.value == null ? '' : String(c.value),
+      public: !!c.public,
+    }));
+}
+
+function normalizeRefs(raw: unknown): OrgRef[] {
+  const rows = Array.isArray(raw) ? raw : [];
+  return rows
+    .filter((r: any) => r && r.id != null)
+    .map((r: any, index: number) => ({
+      id: String(r.id),
+      name: r.name || '',
+      position: Number(r.position) || index + 1,
+    }))
+    .sort((a, b) => a.position - b.position);
+}
+
+function normalizePlaylist(r: any): PlaylistRow {
+  return {
+    id: String(r.id),
+    name: r.name || '',
+    description: r.description || '',
+    customs: normalizeCustoms(r.custom_fields ?? r.customs),
+    views: normalizeRefs(r.views),
+    mediaCount: Number(r.media_count) || 0,
+  };
+}
+
+function normalizeView(r: any): ViewRow {
+  return {
+    id: String(r.id),
+    name: r.name || '',
+    playlists: normalizeRefs(r.playlists),
+  };
+}
+
+/**
+ * Contrat d'écriture de `/organization/*`, vérifié sur le compte réel — la
+ * documentation publiée décrit ces paramètres « in: query », et le bac à sable
+ * les affiche à plat (`custom_fields[0][name]`) : les deux induisent en erreur.
+ * Ce qui marche vraiment :
+ *
+ *  - corps JSON, comme pour `/medias`. Les mêmes paramètres passés en query
+ *    sont refusés (`INVALID_FORM`/`UNKNOWN_FIELDS`) ;
+ *  - `custom_fields` : `[{name, value, public}]` ;
+ *  - `playlists` d'une vue : `[{id, position}]` — un tableau d'identifiants nus
+ *    vaut `INVALID_PLAYLIST`, et omettre `position`, `MANDATORY_PLAYLIST_POSITION`.
+ *
+ * Attention en revanche à la LECTURE : l'API met une à trois secondes à
+ * refléter une écriture, et `fields` s'écrit `fields[]=a&fields[]=b` (la forme
+ * `fields=a,b` vaut `INVALID_FIELDS`). Relire aussitôt après avoir écrit rend
+ * donc l'ancien état — ne pas en conclure que l'écriture a été ignorée.
+ */
+
+/** Champs personnalisés prêts à être envoyés (nom en minuscules, visibilité explicite). */
+function customsPayload(customs: CustomField[], isPublic: boolean) {
+  return customs.map(c => ({
+    name: String(c.name).trim().toLowerCase(),
+    value: c.value == null ? '' : String(c.value),
+    public: c.public ?? isPublic,
+  }));
+}
 
 /**
  * Client Streamlike : crée un média encodé depuis une URL source, gère les
@@ -176,86 +262,174 @@ export class StreamlikeClient {
   }
 
   /**
-   * Liste les playlists de l'organisation (`GET /organization/playlists`).
-   * Même service que {@link searchPlaylists}, mais sans filtre de nom et avec
-   * la pagination : sert à peupler un sélecteur de playlists.
+   * Une page de `GET /organization/playlists`.
+   *
+   * La réponse porte, pour chaque playlist, sa description, ses champs
+   * personnalisés ET les vues auxquelles elle est rattachée. C'est ce qui
+   * permet de reconstruire un classement entier (« toutes les questions »,
+   * « tous les joueurs ») avec une requête au lieu d'un détail par playlist.
    */
-  async listPlaylists(input: { search?: string; offset?: number; limit?: number } = {}): Promise<Array<{ id: string; name: string }>> {
+  private async playlistPage(input: { search?: string; offset?: number; limit?: number }): Promise<{ rows: PlaylistRow[]; total: number }> {
     const offset = Math.max(0, Math.floor(input.offset ?? 0));
     const limit = Math.max(1, Math.floor(input.limit ?? 100));
-    const params = new URLSearchParams({
-      range: `${offset}-${offset + limit - 1}`,
-    });
+    const params = new URLSearchParams({ range: `${offset}-${offset + limit - 1}` });
     if (input.search) params.set('search', input.search);
     const body = await apiFetch(
       `${this.baseUrl}/organization/playlists?${params.toString()}`,
       { method: 'GET', headers: this.authHeaders() },
       'streamlike/listPlaylists',
     );
-    const rows = Array.isArray(body?.data) ? body.data : (Array.isArray(body) ? body : []);
-    return rows.filter((r: any) => r && r.id).map((r: any) => ({
-      id: String(r.id),
-      name: r.name || ''
-    }));
+    const raw = Array.isArray(body?.data) ? body.data : (Array.isArray(body) ? body : []);
+    const rows = raw.filter((r: any) => r && r.id).map(normalizePlaylist);
+    return { rows, total: Number(body?.total_count ?? rows.length) || rows.length };
+  }
+
+  /** Une page de playlists (défaut : les 100 premières). */
+  async listPlaylists(input: { search?: string; offset?: number; limit?: number } = {}): Promise<PlaylistRow[]> {
+    const { rows } = await this.playlistPage(input);
+    return rows;
+  }
+
+  /**
+   * Toutes les playlists du compte, pages enchaînées jusqu'à `total_count`.
+   *
+   * Le plafond de pages évite qu'un compte inattendu (ou un `total_count`
+   * fantaisiste) fasse tourner la boucle indéfiniment sur le chemin d'une
+   * requête admin.
+   */
+  async listAllPlaylists(input: { search?: string; pageSize?: number } = {}): Promise<PlaylistRow[]> {
+    const limit = Math.max(1, Math.floor(input.pageSize ?? 200));
+    const out: PlaylistRow[] = [];
+    let total = Infinity;
+    for (let page = 0; page < 25 && out.length < total; page += 1) {
+      const res = await this.playlistPage({ search: input.search, offset: out.length, limit });
+      total = res.total;
+      if (!res.rows.length) break;
+      out.push(...res.rows);
+    }
+    return out;
+  }
+
+  async getPlaylist(playlistId: string): Promise<PlaylistRow> {
+    const r = await apiFetch(
+      `${this.baseUrl}/organization/playlists/${encodeURIComponent(playlistId)}`,
+      { method: 'GET', headers: this.authHeaders() },
+      'streamlike/getPlaylist',
+    );
+    if (!r || !r.id) throw new Error(`Playlist non trouvée : ${playlistId}`);
+    return normalizePlaylist(r);
+  }
+
+  /** Édite nom, description et champs personnalisés d'une playlist. */
+  async updatePlaylist(playlistId: string, patch: Partial<PlaylistInput>): Promise<void> {
+    const payload: Record<string, unknown> = {};
+    if (patch.name != null) payload.name = patch.name;
+    if (patch.description != null) payload.description = patch.description;
+    // `custom_fields` REMPLACE l'ensemble : l'appelant réécrit tous les champs
+    // qu'il veut conserver, sinon changer la durée effacerait la catégorie.
+    if (patch.customs) payload.custom_fields = customsPayload(patch.customs, false);
+    await apiFetch(
+      `${this.baseUrl}/organization/playlists/${encodeURIComponent(playlistId)}`,
+      {
+        method: 'PATCH',
+        headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      'streamlike/updatePlaylist',
+    );
+  }
+
+  async deletePlaylist(playlistId: string): Promise<void> {
+    await apiFetch(
+      `${this.baseUrl}/organization/playlists/${encodeURIComponent(playlistId)}`,
+      { method: 'DELETE', headers: this.authHeaders() },
+      'streamlike/deletePlaylist',
+    );
+  }
+
+  /**
+   * Range un média déjà créé dans une playlist (ou l'en retire).
+   *
+   * Voie de rattrapage : à la création d'un média, les playlists partent dans
+   * le même appel. Ici on répare après coup — un média envoyé pendant que sa
+   * playlist n'existait pas encore, ou reclassé depuis la console.
+   */
+  async setMediaPlaylist(mediaId: string, playlistId: string, remove = false): Promise<void> {
+    const params = new URLSearchParams({ playlist_id: String(playlistId) });
+    if (remove) params.set('remove', 'true');
+    await apiFetch(
+      `${this.baseUrl}/medias/${encodeURIComponent(mediaId)}/actions/organization/playlist?${params.toString()}`,
+      { method: 'POST', headers: this.authHeaders() },
+      'streamlike/setMediaPlaylist',
+    );
   }
 
   /**
    * Liste les vues de l'organisation (`GET /organization/views`).
-   * Une vue est un regroupement de playlists distinct de la playlist
-   * elle-même — {@link addPlaylistToView} sert à y rattacher une playlist.
+   *
+   * Une vue est un regroupement ORDONNÉ de playlists : c'est elle qui donne
+   * leur sens aux playlists (« celles-ci sont des questions », « celles-là des
+   * joueurs »), et la position d'une playlist dans la vue fait l'ordre.
    */
-  async listViews(): Promise<Array<{ id: string; name: string; playlists: string[] }>> {
+  async listViews(): Promise<ViewRow[]> {
     const body = await apiFetch(
       `${this.baseUrl}/organization/views?range=0-99`,
       { method: 'GET', headers: this.authHeaders() },
       'streamlike/listViews',
     );
     const rows = Array.isArray(body?.data) ? body.data : (Array.isArray(body) ? body : []);
-    return rows.filter((r: any) => r && r.id).map((r: any) => ({
-      id: String(r.id),
-      name: r.name || '',
-      playlists: (Array.isArray(r.playlists) ? r.playlists : []).map((p: any) => String(p.id))
-    }));
+    return rows.filter((r: any) => r && r.id).map(normalizeView);
   }
 
-  async getView(viewId: string): Promise<{ id: string; name: string; playlists: string[] }> {
+  async getView(viewId: string): Promise<ViewRow> {
     const r = await apiFetch(
       `${this.baseUrl}/organization/views/${encodeURIComponent(viewId)}`,
       { method: 'GET', headers: this.authHeaders() },
       'streamlike/getView',
     );
     if (!r || !r.id) throw new Error(`Vue non trouvée : ${viewId}`);
-    return {
-      id: String(r.id),
-      name: r.name || '',
-      playlists: (Array.isArray(r.playlists) ? r.playlists : []).map((p: any) => String(p.id))
-    };
+    return normalizeView(r);
   }
 
   /**
-   * Rattache une playlist à une vue.
+   * Réécrit la liste ORDONNÉE des playlists d'une vue.
    *
-   * Il n'existe pas d'endpoint additif : une vue POSSÈDE sa liste de
-   * playlists (`playlists: string[]`), et `PATCH /organization/views/{id}`
-   * REMPLACE tout le tableau. On fait donc une lecture-modification-écriture :
-   * lire la vue, ajouter l'id s'il n'y est pas déjà, réécrire le tableau
-   * complet. Idempotent (no-op si la playlist y figure déjà) — l'appelant
-   * est responsable de sérialiser les appels concurrents sur une même vue
-   * (deux lecture-modification-écriture en parallèle pourraient s'écraser).
+   * Il n'existe pas d'endpoint additif : `PATCH /organization/views/{id}`
+   * remplace tout le tableau. Cette méthode est donc la primitive de base —
+   * rattacher, détacher et réordonner en découlent. L'appelant est responsable
+   * de sérialiser les appels concurrents sur une même vue : deux
+   * lecture-modification-écriture en parallèle s'écraseraient l'une l'autre.
    */
-  async addPlaylistToView(viewId: string, playlistId: string): Promise<void> {
-    const view = await this.getView(viewId).catch(() => ({ playlists: [] as string[] }));
-    const current = view.playlists;
-    if (current.includes(String(playlistId))) return;
+  async setViewPlaylists(viewId: string, playlistIds: Array<string | number>): Promise<void> {
+    // `position` est obligatoire (sinon `MANDATORY_PLAYLIST_POSITION`) et porte
+    // l'ordre des playlists dans la vue, donc l'ordre des questions. Un tableau
+    // vide vide la vue.
+    const playlists = [...new Set(playlistIds.map(String))].map((id, index) => ({ id, position: index + 1 }));
     await apiFetch(
       `${this.baseUrl}/organization/views/${encodeURIComponent(viewId)}`,
       {
         method: 'PATCH',
         headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playlists: [...current, String(playlistId)].map(id => ({ id })) }),
+        body: JSON.stringify({ playlists }),
       },
       'streamlike/patchView',
     );
+  }
+
+  /** Rattache une playlist à une vue, à la fin. No-op si elle y figure déjà. */
+  async addPlaylistToView(viewId: string, playlistId: string): Promise<void> {
+    const view = await this.getView(viewId);
+    const current = view.playlists.map(p => p.id);
+    if (current.includes(String(playlistId))) return;
+    await this.setViewPlaylists(viewId, [...current, String(playlistId)]);
+  }
+
+  /** Détache une playlist d'une vue sans la supprimer du compte. */
+  async removePlaylistFromView(viewId: string, playlistId: string): Promise<void> {
+    const view = await this.getView(viewId);
+    const current = view.playlists.map(p => p.id);
+    if (!current.includes(String(playlistId))) return;
+    await this.setViewPlaylists(viewId, current.filter(id => id !== String(playlistId)));
   }
 
   /**
@@ -309,18 +483,15 @@ export class StreamlikeClient {
   /**
    * Crée une playlist et renvoie son identifiant.
    *
-   * Même forme que {@link ensureTag} : les métadonnées passent en corps JSON
-   * (et non en query, malgré l'OpenAPI publié — voir {@link createMedia}), la
-   * réponse expose l'id sous l'une des clés usuelles de l'API. Le chemin est
-   * surchargeable (`config.playlistPath`) car il n'est pas documenté dans
-   * l'OpenAPI publié.
+   * Corps JSON, comme {@link createMedia} : description et champs personnalisés
+   * sont bien pris dès la création. Les passer en query ferait échouer l'appel.
    */
-  async createPlaylist(name: string, description: string = ''): Promise<string | number | null> {
-    const p = (this.config.playlistPath || '/organization/playlists').replace(/^\/?/, '/');
-    const payload: Record<string, unknown> = { name };
-    if (description) payload.description = description;
+  async createPlaylist(input: PlaylistInput): Promise<string | null> {
+    const payload: Record<string, unknown> = { name: input.name };
+    if (input.description) payload.description = input.description;
+    if (input.customs?.length) payload.custom_fields = customsPayload(input.customs, false);
     const created = await apiFetch(
-      `${this.baseUrl}${p}`,
+      `${this.baseUrl}/organization/playlists`,
       {
         method: 'POST',
         headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
@@ -328,25 +499,18 @@ export class StreamlikeClient {
       },
       'streamlike/createPlaylist',
     );
-    return created?.id ?? created?.playlist_id ?? created?.permalink ?? null;
+    const id = created?.id ?? created?.playlist_id ?? null;
+    return id == null ? null : String(id);
   }
 
   /**
    * Cherche des playlists par nom (`GET /organization/playlists?search=`).
    *
-   * Sert à retrouver une playlist déjà créée plutôt qu'à en empiler une
-   * nouvelle : le cache du serveur de jeu vit en mémoire, donc un redémarrage
-   * en pleine soirée recréerait sinon « Joueur — Marie » une seconde fois.
+   * `search` est un plein texte, pas une égalité : l'appelant doit encore
+   * comparer les noms s'il cherche une playlist précise.
    */
-  async searchPlaylists(name: string): Promise<Array<{ id: string; name: string }>> {
-    const params = new URLSearchParams({ search: name });
-    const body = await apiFetch(
-      `${this.baseUrl}/organization/playlists?${params.toString()}`,
-      { method: 'GET', headers: this.authHeaders() },
-      'streamlike/searchPlaylists',
-    );
-    const rows = Array.isArray(body?.data) ? body.data : (Array.isArray(body) ? body : []);
-    return rows.filter((r: any) => r && r.id);
+  searchPlaylists(name: string): Promise<PlaylistRow[]> {
+    return this.listPlaylists({ search: name });
   }
 
   /** Crée un token de lecture (player protégé). */

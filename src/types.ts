@@ -12,16 +12,48 @@ export interface StreamlikeConfig {
   apiToken: string;
   /** Base d'API (défaut https://api.streamlike.com). */
   baseUrl?: string;
-  /**
-   * Chemin de création d'une playlist, relatif à `baseUrl`.
-   *
-   * L'OpenAPI publié ne documente pas la gestion des playlists (seulement leur
-   * usage comme `playlists[]` sur un média). On applique donc par défaut la
-   * symétrie observée avec les tags — `POST /organization/tags?name=` —, et on
-   * laisse le chemin surchargeable pour corriger sans toucher au code, comme
-   * c'est déjà le cas pour l'URL du player.
-   */
-  playlistPath?: string;
+}
+
+/** Champ personnalisé d'une playlist ou d'un média. */
+export interface CustomField {
+  name: string;
+  value: string;
+  public?: boolean;
+}
+
+/** Playlist telle qu'elle apparaît dans une vue (ou vue vue depuis une playlist). */
+export interface OrgRef {
+  id: string;
+  name: string;
+  position: number;
+}
+
+/**
+ * Playlist de l'organisation, telle que la renvoie `GET /organization/playlists`.
+ *
+ * Le listing porte déjà `description`, `custom_fields` et `views` : une seule
+ * requête suffit donc à reconstruire un classement complet, sans appel de
+ * détail playlist par playlist.
+ */
+export interface PlaylistRow {
+  id: string;
+  name: string;
+  description: string;
+  customs: CustomField[];
+  views: OrgRef[];
+  mediaCount: number;
+}
+
+export interface ViewRow {
+  id: string;
+  name: string;
+  playlists: OrgRef[];
+}
+
+export interface PlaylistInput {
+  name: string;
+  description?: string;
+  customs?: CustomField[];
 }
 
 export interface SignUploadInput {
