@@ -12,6 +12,56 @@ export interface StreamlikeConfig {
   apiToken: string;
   /** Base d'API (défaut https://api.streamlike.com). */
   baseUrl?: string;
+  /**
+   * Réglages d'encodage appliqués par défaut à tous les envois de ce client.
+   * Surchargeables appel par appel via `EncodeOptions` sur l'entrée.
+   */
+  encode?: EncodeOptions;
+}
+
+/**
+ * Réglages d'encodage transmis à Streamlike au dépôt d'un média.
+ *
+ * Ils étaient codés en dur dans `uploadMedia` (transcription française
+ * systématique, passthru toujours actif) : une borne posée chez un client
+ * anglophone produisait des sous-titres en français sans qu'aucun réglage ne
+ * permette de le corriger. Les défauts ci-dessous reprennent exactement
+ * l'ancien comportement — renseigner ces options ne change rien tant qu'on ne
+ * les renseigne pas.
+ */
+export interface EncodeOptions {
+  /**
+   * Génération automatique des sous-titres (`speech_to_text`).
+   * Défaut `true`.
+   */
+  speechToText?: boolean;
+  /**
+   * Langue parlée dans la vidéo, code ISO (`fr`, `en`, `es`, `de`…).
+   * Défaut `fr`. Ignoré si `speechToText` vaut `false`.
+   */
+  speechToTextLanguage?: string;
+  /**
+   * Traduction automatique des sous-titres générés. Défaut `true`.
+   * Ignoré si `speechToText` vaut `false`.
+   */
+  automaticTranslation?: boolean;
+  /**
+   * Bypasser le ré-encodage quand la source est déjà lisible telle quelle
+   * (`encoding_passthru`) : la vidéo est disponible bien plus vite, au prix du
+   * respect strict des profils du compte. Défaut `true`.
+   */
+  encodingPassthru?: boolean;
+}
+
+/**
+ * Réglages effectifs, une fois les défauts appliqués.
+ * @internal
+ */
+export interface ResolvedEncodeOptions {
+  speechToText: boolean;
+  speechToTextLanguage: string;
+  automaticTranslation: boolean;
+  encodingPassthru: boolean;
 }
 
 /** Champ personnalisé d'une playlist ou d'un média. */
@@ -86,8 +136,14 @@ export interface CreateMediaInput {
   /** Playlists multiples : session, joueur, question… */
   playlistIds?: Array<string | number>;
   description?: string;
-  /** Code langue (ex. `fr`) : déclenche la transcription automatique à l'encodage. */
+  /**
+   * Raccourci historique : code langue (ex. `fr`) activant la transcription.
+   * Équivaut à `encode: { speechToText: true, speechToTextLanguage: '<code>' }`.
+   * Une valeur vide/absente laisse `encode` (ou le défaut du client) décider.
+   */
   speechToText?: string;
+  /** Réglages d'encodage pour cet appel. Priment sur ceux du client. */
+  encode?: EncodeOptions;
   /** Champ personnalisé PSEUDO Streamlike */
   pseudo?: string;
   /** Champ personnalisé ALIAS Streamlike */
@@ -107,6 +163,8 @@ export interface UploadMediaInput {
   playlistIds?: Array<string | number>;
   /** Type MIME, si `file` n'est pas déjà un Blob typé. */
   contentType?: string;
+  /** Réglages d'encodage pour cet appel. Priment sur ceux du client. */
+  encode?: EncodeOptions;
   /** Champ personnalisé PSEUDO Streamlike */
   pseudo?: string;
   /** Champ personnalisé ALIAS Streamlike */

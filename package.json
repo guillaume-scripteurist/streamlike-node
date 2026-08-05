@@ -18,7 +18,8 @@
   "engines": { "node": ">=18" },
   "scripts": {
     "build": "tsup",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test \"test/*.test.mjs\""
   },
   "keywords": ["streamlike", "mediatech", "upload", "encoding", "video", "node", "sdk"],
   "license": "UNLICENSED",

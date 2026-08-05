@@ -4,6 +4,8 @@ import type {
   CreateMediaInput,
   UploadMediaInput,
   CustomField,
+  EncodeOptions,
+  ResolvedEncodeOptions,
   EncodingStatusResult,
   ListMediasInput,
   ListMediasResult,
@@ -87,6 +89,31 @@ function normalizeView(r: any): ViewRow {
  * donc l'ancien état — ne pas en conclure que l'écriture a été ignorée.
  */
 
+/**
+ * Défauts d'encodage : exactement le comportement d'avant leur introduction
+ * (transcription française traduite, passthru actif). Un appel qui ne renseigne
+ * rien produit donc la même requête qu'auparavant.
+ */
+const ENCODE_DEFAULTS: ResolvedEncodeOptions = {
+  speechToText: true,
+  speechToTextLanguage: 'fr',
+  automaticTranslation: true,
+  encodingPassthru: true,
+};
+
+/** Fusionne défauts du package < défauts du client < réglages de l'appel. */
+function resolveEncode(...layers: Array<EncodeOptions | undefined>): ResolvedEncodeOptions {
+  const out: ResolvedEncodeOptions = { ...ENCODE_DEFAULTS };
+  for (const layer of layers) {
+    if (!layer) continue;
+    if (layer.speechToText != null) out.speechToText = !!layer.speechToText;
+    if (layer.speechToTextLanguage) out.speechToTextLanguage = String(layer.speechToTextLanguage).trim();
+    if (layer.automaticTranslation != null) out.automaticTranslation = !!layer.automaticTranslation;
+    if (layer.encodingPassthru != null) out.encodingPassthru = !!layer.encodingPassthru;
+  }
+  return out;
+}
+
 /** Champs personnalisés prêts à être envoyés (nom en minuscules, visibilité explicite). */
 function customsPayload(customs: CustomField[], isPublic: boolean) {
   return customs.map(c => ({
@@ -157,10 +184,24 @@ export class StreamlikeClient {
     // clés en notation à crochets que {@link uploadMedia} (confirmées sur un
     // appel réel côté multipart), mais comme clés JSON à plat. Non encore
     // vérifié côté JSON : à confirmer sur un appel réel.
-    if (input.speechToText) {
-      payload['source[encode][speech_to_text][type]'] = 'subtitle_transcript';
-      payload['source[encode][speech_to_text][automatic_translation]'] = 'true';
-      payload['source[encode][speech_to_text][language]'] = input.speechToText;
+    //
+    // `speechToText` en chaîne reste le déclencheur historique de cet appel :
+    // sans lui ni `encode`, on n'émet aucune clé de transcription — c'est le
+    // comportement que `server.js` connaît depuis toujours pour les médias
+    // encodés depuis une URL.
+    const legacyLang = typeof input.speechToText === 'string' ? input.speechToText.trim() : '';
+    const wantsEncodeKeys = !!legacyLang || !!input.encode || !!this.config.encode;
+    if (wantsEncodeKeys) {
+      const encode = resolveEncode(
+        this.config.encode,
+        legacyLang ? { speechToText: true, speechToTextLanguage: legacyLang } : undefined,
+        input.encode,
+      );
+      if (encode.speechToText) {
+        payload['source[encode][speech_to_text][type]'] = 'subtitle_transcript';
+        payload['source[encode][speech_to_text][automatic_translation]'] = String(encode.automaticTranslation);
+        payload['source[encode][speech_to_text][language]'] = encode.speechToTextLanguage;
+      }
     }
 
     return apiFetch(`${this.baseUrl}/medias`, {
@@ -212,12 +253,18 @@ export class StreamlikeClient {
       // SharedArrayBuffer, ce qui n'arrive pas ici (Buffer de fs.readFile).
       : new Blob([input.file as unknown as BlobPart], { type: input.contentType || 'video/mp4' });
     body.append('source[encode][media_file]', blob, input.filename);
+
+    // Réglages d'encodage. Ils étaient en dur ici : toute borne installée
+    // produisait des sous-titres français, quelle que soit la langue parlée.
+    const encode = resolveEncode(this.config.encode, input.encode);
     // Passthru : la source est déjà dans un format lisible tel quel, inutile
     // de la ré-encoder — accélère la disponibilité de la vidéo après upload.
-    body.append('source[encode][encoding_passthru]', '1');
-    body.append('source[encode][speech_to_text][type]', 'subtitle_transcript');
-    body.append('source[encode][speech_to_text][automatic_translation]', 'true');
-    body.append('source[encode][speech_to_text][language]', 'fr');
+    if (encode.encodingPassthru) body.append('source[encode][encoding_passthru]', '1');
+    if (encode.speechToText) {
+      body.append('source[encode][speech_to_text][type]', 'subtitle_transcript');
+      body.append('source[encode][speech_to_text][automatic_translation]', String(encode.automaticTranslation));
+      body.append('source[encode][speech_to_text][language]', encode.speechToTextLanguage);
+    }
 
     // Pas de Content-Type explicite : fetch doit poser lui-même la frontière
     // (`boundary=…`) du multipart.
