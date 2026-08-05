@@ -42,6 +42,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/guillaume-scripteurist/streamlike-node.git"
+    "url": "git+https://github.com/guillaume-scripteurist/streamlike-node.git"
   }
 }
