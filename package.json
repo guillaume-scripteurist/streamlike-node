@@ -14,17 +14,34 @@
       "require": "./dist/index.cjs"
     }
   },
-  "files": ["dist"],
-  "engines": { "node": ">=18" },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test \"test/*.test.mjs\""
+    "test": "npm run build && node --test \"test/*.test.mjs\"",
+    "prepare": "npm run build"
   },
-  "keywords": ["streamlike", "mediatech", "upload", "encoding", "video", "node", "sdk"],
+  "keywords": [
+    "streamlike",
+    "mediatech",
+    "upload",
+    "encoding",
+    "video",
+    "node",
+    "sdk"
+  ],
   "license": "UNLICENSED",
   "devDependencies": {
     "tsup": "^8.3.0",
     "typescript": "^5.9.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/guillaume-scripteurist/streamlike-node.git"
   }
 }
