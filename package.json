@@ -1,6 +1,6 @@
 {
   "name": "@mediatech/streamlike-node",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Node server SDK for Mediatech secure upload + Streamlike encoding.",
   "type": "module",
   "sideEffects": false,

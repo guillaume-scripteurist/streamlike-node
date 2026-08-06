@@ -9,6 +9,7 @@ import type {
   EncodingStatusResult,
   ListMediasInput,
   ListMediasResult,
+  MediaVisibility,
   OrgRef,
   PlaylistInput,
   PlaylistRow,
@@ -498,12 +499,41 @@ export class StreamlikeClient {
     );
   }
 
-  /** Lit et normalise le statut d'encodage d'un média. */
-  async getEncodingStatus(mediaId: string): Promise<EncodingStatusResult> {
-    const media = await apiFetch(`${this.baseUrl}/medias/${encodeURIComponent(mediaId)}`, {
+  /**
+   * Change l'état de publication d'un média.
+   *
+   * `offline` le retire de la diffusion sans rien détruire : c'est ce qui rend
+   * une suppression rattrapable, là où un DELETE ne laisse aucun recours. Même
+   * forme que {@link updateMediaCustoms} (PATCH + corps JSON) et même clé
+   * `visibility.state` que celle posée à la création par {@link createMedia}.
+   */
+  async setMediaVisibility(mediaId: string, state: MediaVisibility): Promise<any> {
+    return apiFetch(
+      `${this.baseUrl}/medias/${encodeURIComponent(mediaId)}`,
+      {
+        method: 'PATCH',
+        headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ visibility: { state } }),
+      },
+      'streamlike/setMediaVisibility',
+    );
+  }
+
+  /**
+   * Le média tel que l'API le rend : champs personnalisés, playlists, tags,
+   * visibilité, source. La réponse n'est pas enveloppée dans `data`, à la
+   * différence des collections.
+   */
+  async getMedia(mediaId: string): Promise<any> {
+    return apiFetch(`${this.baseUrl}/medias/${encodeURIComponent(mediaId)}`, {
       method: 'GET',
       headers: this.authHeaders(),
     }, 'streamlike/getMedia');
+  }
+
+  /** Lit et normalise le statut d'encodage d'un média. */
+  async getEncodingStatus(mediaId: string): Promise<EncodingStatusResult> {
+    const media = await this.getMedia(mediaId);
     const status = (media?.source?.encoding_status)
       || media?.['source.encoding_status']
       || 'unknown';

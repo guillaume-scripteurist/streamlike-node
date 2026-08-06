@@ -24,7 +24,7 @@ construit le paquet. Rien à faire de plus.
 
 | Classe | Rôle |
 | --- | --- |
-| `StreamlikeClient` | Médias (`createMedia` depuis une URL, `uploadMedia` en multipart), playlists, vues d'organisation, tags, jetons de lecture, sondage d'encodage. |
+| `StreamlikeClient` | Médias (`createMedia` depuis une URL, `uploadMedia` en multipart, `getMedia`, `setMediaVisibility`), playlists, vues d'organisation, tags, jetons de lecture, sondage d'encodage. |
 | `MediatechUploadClient` | `signUpload` / `completeUpload` / `refreshDownloadUrl` — fabrique le « ticket » que le navigateur utilise pour pousser ses octets vers GCS. |
 
 ## Deux voies de dépôt, et comment choisir
@@ -58,6 +58,18 @@ const client = new StreamlikeClient({
 // Surchargeable appel par appel :
 await client.uploadMedia({ ...media, encode: { speechToTextLanguage: 'es' } });
 ```
+
+## Retirer un média sans le détruire
+
+```ts
+await client.setMediaVisibility(mediaId, 'offline');
+```
+
+`PATCH /medias/:id` avec `{ visibility: { state } }` — la même clé que celle posée à la création.
+Un média `offline` n'est plus diffusable mais reste entier : ses playlists, ses champs
+personnalisés et son encodage l'attendent, et un `'online'` le rend tel qu'il était. C'est ce
+qui permet d'offrir à quelqu'un un bouton « supprimer ma vidéo » sans transformer un geste
+malheureux en perte définitive. `listMedias({ visibility: 'offline' })` les retrouve.
 
 ## Ce que la documentation officielle dit de travers
 

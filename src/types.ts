@@ -171,6 +171,14 @@ export interface UploadMediaInput {
   alias?: string;
 }
 
+/**
+ * État de publication d'un média.
+ *
+ * `offline` le rend indiffusable sans rien détruire — c'est l'état d'une vidéo
+ * retirée par son auteur ou mise de côté par l'organisateur, et il se défait.
+ */
+export type MediaVisibility = 'online' | 'offline' | 'archived';
+
 /** Filtres de `GET /medias`. Tous optionnels : sans rien, on liste tout. */
 export interface ListMediasInput {
   /** Recherche plein texte (nom, description…). */
@@ -185,8 +193,7 @@ export interface ListMediasInput {
   tagIds?: Array<string | number>;
   /** `video` | `audio` | `live`. */
   type?: string;
-  /** `online` | `offline` | `archived`. */
-  visibility?: string;
+  visibility?: MediaVisibility;
   /** Ne garder que les médias encodés (donc réellement diffusables). */
   encoded?: boolean;
 }
