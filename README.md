@@ -1,4 +1,4 @@
-# @mediatech/streamlike-node
+# @scripteurist/streamlike-node
 
 SDK **serveur** pour Streamlike et l'upload sécurisé Mediatech. Node ≥ 18, aucune
 dépendance d'exécution.
@@ -13,7 +13,7 @@ Pas encore publié sur npm — la dépendance passe par l'URL git :
 ```jsonc
 // package.json
 "dependencies": {
-  "@mediatech/streamlike-node": "git+ssh://git@github.com/guillaume-scripteurist/streamlike-node.git#v0.1.0"
+  "@scripteurist/streamlike-node": "git+ssh://git@github.com/guillaume-scripteurist/streamlike-node.git#v0.1.0"
 }
 ```
 
@@ -103,7 +103,7 @@ commit à chaque essai :
 
 ```bash
 cd streamlike-node && npm link
-cd ../mon-projet   && npm link @mediatech/streamlike-node
+cd ../mon-projet   && npm link @scripteurist/streamlike-node
 ```
 
 ## Licence
