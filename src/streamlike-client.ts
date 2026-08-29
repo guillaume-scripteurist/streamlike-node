@@ -590,7 +590,36 @@ export class StreamlikeClient {
     return this.listPlaylists({ search: name });
   }
 
-  /** Crée un token de lecture (player protégé). */
+  /**
+   * Pistes audio déclarées sur un média (`GET /medias/{id}/audio-tracks`).
+   *
+   * Demande l'API **5.31** : un serveur plus ancien répond 404, ce qui se lit
+   * comme « ce média n'existe pas ». `getMedia()` rend aussi
+   * `source.audio_tracks` depuis la 5.37, en lecture seule et sur un média à
+   * la fois. Le drapeau `is_multiple_audio` de `/ws/media`, lui, existe depuis
+   * bien plus longtemps : pour savoir simplement s'il y a plusieurs pistes,
+   * c'est la question la moins chère.
+   */
+  async getAudioTracks(mediaId: string): Promise<any> {
+    return apiFetch(`${this.baseUrl}/medias/${encodeURIComponent(mediaId)}/audio-tracks`, {
+      method: 'GET',
+      headers: this.authHeaders(),
+    }, 'streamlike/getAudioTracks');
+  }
+
+  /**
+   * Crée un jeton de lecture pour UN média protégé.
+   *
+   * À émettre **par demande de lecture**, après notre propre contrôle
+   * d'autorisation, et à passer au player en `sltoken=`. Le jeton est lié à une
+   * IP, un user-agent et une fenêtre de temps : le réémettre est normal, le
+   * mettre en cache pour plusieurs spectateurs ne l'est pas.
+   *
+   * Les valeurs par défaut (`0.0.0.0`, un user-agent générique) désactivent de
+   * fait ces liens — pratique en recette, à ne pas laisser en production, où
+   * l'IP et le user-agent du spectateur sont justement ce qui donne sa valeur
+   * au jeton.
+   */
   createPlaybackToken(
     mediaId: string,
     opts: { expireAt: string; ip?: string; userAgent?: string },
