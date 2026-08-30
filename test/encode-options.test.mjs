@@ -121,3 +121,59 @@ test('createMedia : le raccourci historique `speechToText: "fr"` marche toujours
   assert.equal(payload['source[encode][speech_to_text][language]'], 'de');
   assert.equal(payload['source[encode][speech_to_text][type]'], 'subtitle_transcript');
 });
+
+/**
+ * Un plafond de débit doit se distinguer d'une panne.
+ *
+ * Mediatech plafonne les URL d'upload signées **par compte et par heure**. Un
+ * 429 concerne donc tout un événement, pas la personne qui l'a déclenché — et
+ * un appelant qui le prend pour une erreur passagère réessaie aussitôt, se
+ * refait refuser, et creuse le trou.
+ */
+import { MediatechUploadClient, ApiError } from '../dist/index.js';
+
+/** Remplace `fetch` par un refus 429 portant l'en-tête demandé. */
+async function refuse(retryAfter) {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => new Response(
+    JSON.stringify({ detail: 'Too many signed URLs.' }),
+    {
+      status: 429,
+      headers: retryAfter == null
+        ? { 'content-type': 'application/json' }
+        : { 'content-type': 'application/json', 'retry-after': retryAfter },
+    },
+  );
+  try {
+    const client = new MediatechUploadClient({ apiToken: 'jeton', accountId: 'compte' });
+    await client.signUpload({ filename: 'a.webm', callbackUrl: 'https://exemple.test/cb' });
+    throw new Error('aurait dû être refusé');
+  } catch (err) {
+    return err;
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+test('un 429 est reconnu comme un plafond, pas comme une panne', async () => {
+  const err = await refuse('120');
+  assert.ok(err instanceof ApiError);
+  assert.equal(err.status, 429);
+  assert.equal(err.isRateLimited, true);
+  assert.equal(err.retryAfterSeconds, 120);
+});
+
+test('Retry-After en date HTTP est lu aussi', async () => {
+  // Ne gérer que la forme numérique produit un NaN silencieux, et l'appelant
+  // réessaie immédiatement — exactement ce que le plafond cherche à éviter.
+  const dans60s = new Date(Date.now() + 60_000).toUTCString();
+  const err = await refuse(dans60s);
+  assert.ok(err.retryAfterSeconds >= 55 && err.retryAfterSeconds <= 61,
+    `attendu ~60, reçu ${err.retryAfterSeconds}`);
+});
+
+test('sans Retry-After, on ne devine pas de délai', async () => {
+  const err = await refuse(null);
+  assert.equal(err.isRateLimited, true);
+  assert.equal(err.retryAfterSeconds, undefined);
+});

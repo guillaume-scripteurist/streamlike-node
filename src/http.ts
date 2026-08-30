@@ -5,15 +5,50 @@ export class ApiError extends Error {
     public readonly status: number | null,
     message: string,
     public readonly body?: unknown,
+    /**
+     * Secondes à attendre avant de réessayer, lues dans l'en-tête
+     * `Retry-After` d'un 429.
+     *
+     * Sans elle, un plafond de débit est indiscernable d'une panne : l'appelant
+     * réessaie aussitôt, se refait refuser, et creuse le trou. Mediatech
+     * plafonne notamment les URL d'upload signées **par compte et par heure** —
+     * un refus qui concerne alors tout un événement, pas la personne qui l'a
+     * déclenché.
+     */
+    public readonly retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = 'ApiError';
+  }
+
+  /** Le refus vient-il d'un plafond de débit plutôt que d'une erreur de fond ? */
+  get isRateLimited(): boolean {
+    return this.status === 429;
   }
 }
 
 async function readBody(res: Response): Promise<unknown> {
   const text = await res.text();
   try { return JSON.parse(text); } catch { return text; }
+}
+
+
+/**
+ * `Retry-After`, en secondes.
+ *
+ * L'en-tête admet deux formes — un nombre de secondes, ou une date HTTP. On
+ * lit les deux : ne gérer que la première produit un `NaN` silencieux sur les
+ * serveurs qui envoient la seconde, et l'appelant réessaie immédiatement,
+ * c'est-à-dire exactement ce que le plafond cherchait à éviter.
+ */
+function parseRetryAfter(res: Response): number | undefined {
+  const raw = res.headers?.get?.('retry-after');
+  if (!raw) return undefined;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds);
+  const date = Date.parse(raw);
+  if (Number.isNaN(date)) return undefined;
+  return Math.max(0, Math.ceil((date - Date.now()) / 1000));
 }
 
 /** fetch avec gestion d'erreur uniforme (jette une {@link ApiError} si non-2xx). */
@@ -30,7 +65,7 @@ export async function apiFetch(url: string, options: RequestInit, label: string)
       body && typeof body === 'object' && 'detail' in (body as any)
         ? JSON.stringify((body as any).detail)
         : (typeof body === 'string' ? body.slice(0, 300) : JSON.stringify(body).slice(0, 300));
-    throw new ApiError(label, res.status, `[${label}] HTTP ${res.status} : ${detail}`, body);
+    throw new ApiError(label, res.status, `[${label}] HTTP ${res.status} : ${detail}`, body, parseRetryAfter(res));
   }
   return body;
 }

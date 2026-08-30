@@ -113,10 +113,35 @@ export interface SignUploadInput {
   callbackUrl: string;
 }
 
+/**
+ * Réponse de `POST /upload/sign`.
+ *
+ * Les champs sont ceux que l'appelant doit VRAIMENT relayer à son client, et
+ * ils étaient tous noyés dans l'index de secours `[key: string]: unknown` —
+ * ce qui obligeait à les caster un par un, donc à les deviner.
+ */
 export interface SignUploadResponse {
+  /** URL à appeler en POST pour ouvrir la session résumable. */
   upload_url: string;
+  /** Chemin du blob. C'est la SEULE clé que le rappel rapportera. */
   blob_path: string;
+  bucket?: string;
+  /**
+   * En-têtes que le stockage EXIGE à l'ouverture de session — dont
+   * `x-goog-content-length-range`. « Any deviation will cause GCS to reject
+   * the request » : ils se relaient tels quels, sans en ajouter ni en retirer.
+   */
   required_headers?: Record<string, string>;
+  /** Horodatage ISO-8601 d'expiration de l'URL signée. */
+  expires_at?: string;
+  /**
+   * Bornes de taille SIGNÉES dans l'URL, et imposées par Google.
+   *
+   * À relayer jusqu'au client : sans elles, une vidéo trop lourde n'est
+   * refusée qu'APRÈS avoir été poussée en entier.
+   */
+  min_bytes?: number;
+  max_bytes?: number;
   [key: string]: unknown;
 }
 

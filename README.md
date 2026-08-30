@@ -13,7 +13,7 @@ Pas encore publié sur npm — la dépendance passe par l'URL git :
 ```jsonc
 // package.json
 "dependencies": {
-  "@scripteurist/streamlike-node": "git+ssh://git@github.com/guillaume-scripteurist/streamlike-node.git#v0.4.0"
+  "@scripteurist/streamlike-node": "git+ssh://git@github.com/guillaume-scripteurist/streamlike-node.git#v0.4.1"
 }
 ```
 
@@ -157,6 +157,8 @@ de ce package : chacun échoue **en silence** ou avec un message trompeur.
 | Playlists d'une vue en tableau d'ids | `[{id, position}]`. Sans `position` : `MANDATORY_PLAYLIST_POSITION`. |
 | `fields=a,b` | `fields[]=a&fields[]=b`. Sinon `INVALID_FIELDS`. |
 | Relire juste après avoir écrit | L'API met une à trois secondes à refléter une écriture. Ne pas en conclure que l'écriture a été ignorée. |
+| Un 429 ressemble à une panne passagère | C'est un **plafond de débit**. Mediatech plafonne les URL d'upload signées **par compte et par heure** : le refus concerne tout le compte, pas l'appel. `ApiError.isRateLimited` et `retryAfterSeconds` (secondes **ou** date HTTP) le distinguent — réessayer aussitôt creuse le trou. |
+| Le ticket d'upload se redemande à chaque essai | Chaque signature consomme le quota horaire du COMPTE. Conserver le ticket tant qu'il est valable est la seule façon de tenir un réessai — et ça garde le même `blob_path`, donc la reprise possible. |
 | `/ws/*` : `page` ressemble à un numéro de page | C'est un **décalage**. `pagesize=10&page=10` rend les éléments 10 à 19. Cette lib expose `offset`/`limit` et traduit. |
 | `/ws/*` : `sortorder=desc` | `up` / `down`. `desc` répond **404**. Les deux vocabulaires sont acceptés ici et traduits. |
 | `/ws/*` : une erreur est du JSON | Une erreur est un **404 en HTML** — identifiant inconnu, valeur de paramètre invalide ou IP non autorisée, sans distinction. `WebserviceError` porte l'indice. |
