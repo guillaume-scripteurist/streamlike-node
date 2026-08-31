@@ -146,10 +146,25 @@ export class StreamlikeClient {
    *
    * L'OpenAPI publié documente ces paramètres en QUERY, mais un appel réel a
    * montré l'API refuser cette forme (`INVALID_FORM`/`UNKNOWN_FIELDS`) — sur ce
-   * point la doc ment. La forme qui fonctionne est un corps JSON :
-   * `{name, permalink, type, visibility:{state}, source, description, tag_ids,
-   * playlists}`. `source` = l'URL MP4 (encode-from-URL, à la place du binaire
-   * `source[media_file]` du multipart de {@link uploadMedia}).
+   * point la doc ment. La forme qui fonctionne est un corps JSON.
+   *
+   * ## Les deux erreurs que cette méthode a portées, et leur forme juste
+   *
+   * Le corps est du JSON **imbriqué**, pas des clés à crochets à plat. La
+   * notation `source[encode][media_url]` de la documentation décrit un chemin
+   * de champ de FORMULAIRE ; envoyée telle quelle comme clé JSON, elle revient
+   * en `UNKNOWN_FIELDS`. `visibility: { state }`, qui a toujours fonctionné,
+   * disait déjà que ce corps s'imbrique.
+   *
+   *  - l'URL source va dans `source.encode.media_url`. Elle partait à la
+   *    racine, en `source: "<url>"` — et comme les clés de transcription
+   *    partaient à côté sous `source[encode]…`, l'API voyait `source` déclaré
+   *    deux fois, scalaire et structure : `INVALID_SOURCE` + `UNKNOWN_FIELDS`,
+   *  - `playlists` est un tableau d'OBJETS `{ id, position }`, `position`
+   *    entier à partir de 1. Il partait en tableau de chaînes :
+   *    `INVALID_PLAYLIST`. Les identifiants sont ceux, chiffrés, que rend la
+   *    plateforme — jamais un numéro d'ordre interne. Sans identifiant, la clé
+   *    n'est pas émise du tout : un tableau vide est un refus, pas un silence.
    */
   createMedia(input: CreateMediaInput): Promise<any> {
     const payload: Record<string, unknown> = {
@@ -158,7 +173,11 @@ export class StreamlikeClient {
       type: input.type || 'video',
       visibility: { state: 'online' },
     };
-    if (input.sourceUrl) payload.source = input.sourceUrl;
+    // `source.encode` est construit d'un bloc, plus bas : l'URL et les
+    // réglages de transcription sont deux faces du MÊME champ, et c'est de les
+    // avoir écrits à deux endroits que venait le refus.
+    const encodeSource: Record<string, unknown> = {};
+    if (input.sourceUrl) encodeSource.media_url = input.sourceUrl;
     if (input.description) payload.description = input.description;
 
     if (input.pseudo || input.alias) {
@@ -172,19 +191,23 @@ export class StreamlikeClient {
     // Un média peut appartenir à plusieurs playlists (session, joueur,
     // question). On déduplique : la même playlist envoyée deux fois est au
     // mieux inutile, au pire refusée.
+    //
+    // `position` est OBLIGATOIRE et commence à 1. L'ordre est celui de
+    // l'appelant : il connaît la hiérarchie de son rangement, nous non.
     const playlists = [...new Set(
       [...(input.playlistIds || []), input.playlistId]
         .filter((p): p is string | number => p != null && p !== '')
         .map(String),
     )];
-    if (playlists.length) payload.playlists = playlists;
+    if (playlists.length) {
+      payload.playlists = playlists.map((id, index) => ({ id, position: index + 1 }));
+    }
 
-    // Transcription à l'encodage : `source` reste la CHAÎNE validée ci-dessus
-    // (impossible d'y imbriquer `encode.speech_to_text` sans la transformer en
-    // objet, ce qui casserait la forme éprouvée) — on reprend donc les mêmes
-    // clés en notation à crochets que {@link uploadMedia} (confirmées sur un
-    // appel réel côté multipart), mais comme clés JSON à plat. Non encore
-    // vérifié côté JSON : à confirmer sur un appel réel.
+    // Transcription à l'encodage, DANS `source.encode` — au même endroit que
+    // l'URL, parce que c'est le même champ. Les mêmes clés que
+    // {@link uploadMedia} (confirmées sur un appel réel côté multipart), mais
+    // imbriquées : le multipart énumère des chemins de champ, le JSON porte la
+    // structure que ces chemins décrivent.
     //
     // `speechToText` en chaîne reste le déclencheur historique de cet appel :
     // sans lui ni `encode`, on n'émet aucune clé de transcription — c'est le
@@ -199,11 +222,28 @@ export class StreamlikeClient {
         input.encode,
       );
       if (encode.speechToText) {
-        payload['source[encode][speech_to_text][type]'] = 'subtitle_transcript';
-        payload['source[encode][speech_to_text][automatic_translation]'] = String(encode.automaticTranslation);
-        payload['source[encode][speech_to_text][language]'] = encode.speechToTextLanguage;
+        encodeSource.speech_to_text = {
+          type: 'subtitle_transcript',
+          automatic_translation: encode.automaticTranslation,
+          language: encode.speechToTextLanguage,
+        };
       }
+      // Émis seulement s'il est demandé, jamais à `false`. C'est la règle du
+      // multipart, et elle vaut ici : l'API lit la PRÉSENCE du champ, pas sa
+      // valeur — un `false` explicite activerait le passthru tout en donnant
+      // l'impression de l'avoir coupé.
+      //
+      // Cette voie ne l'émettait pas du tout : un `encodingPassthru` réglé
+      // dans l'application ne franchissait que le chemin multipart, et les
+      // vidéos encodées depuis une URL attendaient un ré-encodage complet sans
+      // que rien ne le signale.
+      if (encode.encodingPassthru) encodeSource.encoding_passthru = true;
     }
+
+    // Émis seulement s'il y a quelque chose dedans : un `source: {}` serait un
+    // champ déclaré vide, ce que l'API lit comme une source invalide et non
+    // comme une absence.
+    if (Object.keys(encodeSource).length) payload.source = { encode: encodeSource };
 
     return apiFetch(`${this.baseUrl}/medias`, {
       method: 'POST',

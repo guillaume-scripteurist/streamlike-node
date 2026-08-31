@@ -101,8 +101,10 @@ test('createMedia sans transcription demandée n\'émet rien — comportement hi
   } finally {
     globalThis.fetch = original;
   }
-  const clesEncode = Object.keys(payload).filter(k => k.startsWith('source[encode]'));
-  assert.deepEqual(clesEncode, []);
+  // L'URL est le SEUL contenu de `source.encode` : rien sur la transcription.
+  assert.deepEqual(payload.source, { encode: { media_url: 'https://exemple/v.mp4' } });
+  // Et aucune clé à crochets à plat, qui reviendrait en `UNKNOWN_FIELDS`.
+  assert.deepEqual(Object.keys(payload).filter(k => k.includes('[')), []);
 });
 
 test('createMedia : le raccourci historique `speechToText: "fr"` marche toujours', async () => {
@@ -118,8 +120,94 @@ test('createMedia : le raccourci historique `speechToText: "fr"` marche toujours
   } finally {
     globalThis.fetch = original;
   }
-  assert.equal(payload['source[encode][speech_to_text][language]'], 'de');
-  assert.equal(payload['source[encode][speech_to_text][type]'], 'subtitle_transcript');
+  assert.deepEqual(payload.source.encode.speech_to_text, {
+    type: 'subtitle_transcript',
+    automatic_translation: true,
+    language: 'de',
+  });
+});
+
+/**
+ * La forme du corps de `createMedia`, qui a valu un `400` en production.
+ *
+ * `INVALID_SOURCE`, `INVALID_PLAYLIST` et `UNKNOWN_FIELDS` d'un seul coup :
+ * l'URL partait à la racine en `source: "<url>"` pendant que la transcription
+ * partait à côté en clés à crochets à plat — l'API voyait donc `source`
+ * déclaré deux fois — et les playlists partaient en simples chaînes.
+ *
+ * Le corps est du JSON IMBRIQUÉ. La notation `source[encode][media_url]` de la
+ * documentation décrit un chemin de champ de formulaire, pas une clé JSON.
+ */
+test('createMedia : source et playlists ont la forme que l\'API attend', async () => {
+  const original = globalThis.fetch;
+  let payload = null;
+  globalThis.fetch = async (url, options) => {
+    payload = JSON.parse(options.body);
+    return new Response('{}', { status: 201, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const client = new StreamlikeClient({ apiToken: 'jeton-de-test' });
+    await client.createMedia({
+      name: 'n',
+      permalink: 'p',
+      sourceUrl: 'https://exemple/v.mp4',
+      playlistIds: ['b17c40de92f5a3c8', 'a02f18cc74b9e6d3', 'b17c40de92f5a3c8'],
+      encode: { speechToText: true, speechToTextLanguage: 'fr', automaticTranslation: true },
+    });
+  } finally {
+    globalThis.fetch = original;
+  }
+
+  assert.equal(payload.source.encode.media_url, 'https://exemple/v.mp4');
+  assert.equal(payload.source.encode.speech_to_text.language, 'fr');
+  assert.equal(payload.source.encode.encoding_passthru, true);
+  // `position` est obligatoire et commence à 1 ; le doublon est écarté avant
+  // la numérotation, sans quoi les positions sauteraient.
+  assert.deepEqual(payload.playlists, [
+    { id: 'b17c40de92f5a3c8', position: 1 },
+    { id: 'a02f18cc74b9e6d3', position: 2 },
+  ]);
+  assert.deepEqual(Object.keys(payload).filter(k => k.includes('[')), []);
+});
+
+test('createMedia : passthru coupé, la clé est absente et non mise à false', async () => {
+  // Même règle que sur le multipart : l'API lit la présence du champ, pas sa
+  // valeur. Un `false` explicite activerait le passthru.
+  const original = globalThis.fetch;
+  let payload = null;
+  globalThis.fetch = async (url, options) => {
+    payload = JSON.parse(options.body);
+    return new Response('{}', { status: 201, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const client = new StreamlikeClient({ apiToken: 'jeton-de-test' });
+    await client.createMedia({
+      name: 'n',
+      permalink: 'p',
+      sourceUrl: 'https://exemple/v.mp4',
+      encode: { encodingPassthru: false },
+    });
+  } finally {
+    globalThis.fetch = original;
+  }
+  assert.equal('encoding_passthru' in payload.source.encode, false);
+});
+
+test('createMedia : sans playlist, la clé n\'est pas émise du tout', async () => {
+  // Un tableau vide est un refus (`INVALID_PLAYLIST`), pas un silence.
+  const original = globalThis.fetch;
+  let payload = null;
+  globalThis.fetch = async (url, options) => {
+    payload = JSON.parse(options.body);
+    return new Response('{}', { status: 201, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const client = new StreamlikeClient({ apiToken: 'jeton-de-test' });
+    await client.createMedia({ name: 'n', permalink: 'p', sourceUrl: 'https://exemple/v.mp4' });
+  } finally {
+    globalThis.fetch = original;
+  }
+  assert.equal('playlists' in payload, false);
 });
 
 /**
