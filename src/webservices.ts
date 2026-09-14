@@ -95,7 +95,24 @@ export interface PlaylistQuery {
    * paramètre et l'ignore, ce qui ne se voit pas dans la réponse.
    */
   multipleAudio?: boolean;
-  /** Conserve l'ordre manuel de la playlist par-dessus le tri demandé. */
+  /**
+   * `1` ou `2` : ne garder que les médias publiés par cet encodeur
+   * (webservices 5.20). Un média qui ne publie rien n'est rendu par aucune
+   * des deux valeurs : `1` + `2` font moins que la liste non filtrée.
+   */
+  encodingVersion?: 1 | 2;
+  /**
+   * Ne garder que les médias classés dans au moins une playlist.
+   *
+   * Ce n'est PAS un ordre — cette lib l'a longtemps décrit comme « conserve
+   * l'ordre manuel par-dessus le tri », ce qu'il n'a jamais fait. Inutile
+   * avec `playlistId`, qui l'implique.
+   *
+   * Envoyé en `true`/`false`, jamais en `1`/`0` : avant les webservices 5.20 la
+   * plateforme lisait les chiffres À L'ENVERS (`1` coupait le filtre), et un
+   * appelant réglé « à l'essai » sur un ancien serveur obtient l'inverse sur le
+   * nouveau. Les mots ont toujours voulu dire ce qu'ils disent.
+   */
   forcePlaylist?: boolean;
   /**
    * Médias à exclure. Ils partent dans l'URL, une occurrence chacun, et le
@@ -212,7 +229,8 @@ export class StreamlikeWebservices {
     if (input.country) params.set('country', input.country);
     if (input.encoded != null) params.set('encoded', input.encoded ? '1' : '0');
     if (input.multipleAudio != null) params.set('multiple_audio', input.multipleAudio ? '1' : '0');
-    if (input.forcePlaylist) params.set('forceplaylist', '1');
+    if (input.encodingVersion != null) params.set('encoding_version', String(input.encodingVersion));
+    if (input.forcePlaylist != null) params.set('forceplaylist', input.forcePlaylist ? 'true' : 'false');
     for (const id of input.notMediaIds || []) params.append('not_media_ids[]', String(id));
     for (const id of input.notPlaylistIds || []) params.append('not_playlist_ids[]', String(id));
     for (const id of input.notViewIds || []) params.append('not_view_ids[]', String(id));

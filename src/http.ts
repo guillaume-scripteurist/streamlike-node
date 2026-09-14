@@ -25,6 +25,32 @@ export class ApiError extends Error {
   get isRateLimited(): boolean {
     return this.status === 429;
   }
+
+  /**
+   * Fenêtre de maintenance : **le seul 401 qui vaille un réessai.**
+   *
+   * Depuis l'API 5.30, une fenêtre annoncée ne ferme plus que les ÉCRITURES
+   * (`POST`, `PATCH`, `DELETE`, et `GET /tools/shorturl` qui fabrique un lien) :
+   * elles répondent `401` avec le message `API_OFFLINE` et n'écrivent rien.
+   * Les lectures passent, les webservices n'ont jamais été concernés.
+   *
+   * Se distingue sur le MESSAGE, jamais sur le statut : tout autre 401 veut
+   * dire que la clé est le problème, et le réessayer avec la même clé ne
+   * réussira jamais. Une borne qui tombe ici garde sa file d'upload et la
+   * vide quand la fenêtre se referme — elle ne réveille personne.
+   */
+  get isOffline(): boolean {
+    if (this.status !== 401) return false;
+    const message = this.body && typeof this.body === 'object'
+      ? (this.body as { message?: unknown }).message
+      : this.body;
+    return typeof message === 'string' && message.toUpperCase().includes('API_OFFLINE');
+  }
+
+  /** Vaut-il la peine de réessayer plus tard, avec les mêmes identifiants ? */
+  get isRetryable(): boolean {
+    return this.isRateLimited || this.isOffline || (this.status != null && this.status >= 500) || this.status === null;
+  }
 }
 
 async function readBody(res: Response): Promise<unknown> {

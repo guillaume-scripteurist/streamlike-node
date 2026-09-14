@@ -39,6 +39,21 @@ export interface WsMedia {
   lastPlaybackAt: string;
   is360: boolean;
   isMultipleAudio: boolean;
+  /**
+   * Pistes audio publiées (webservices 5.20). Vide sur un média mono-piste
+   * antérieur au multipiste, ou non encodé — `isMultipleAudio` reste la
+   * question la moins chère quand on veut seulement savoir s'il y en a plusieurs.
+   */
+  audioTracks: WsAudioTrack[];
+  /**
+   * Encodeur qui a produit les fichiers servis AUJOURD'HUI : `2` pour le
+   * pipeline courant, `1` pour l'encodeur historique (webservices 5.20).
+   *
+   * `null` quand le média ne publie rien — jamais encodé, live, premier
+   * encodage en cours. Ce n'est PAS « legacy » : un test `=== 2 ? … : legacy`
+   * rangerait tous les médias illisibles dans la mauvaise case.
+   */
+  encodingVersion: 1 | 2 | null;
   isTokenized: boolean;
   hasPassword: boolean;
   isDownloadable: boolean;
@@ -78,6 +93,18 @@ export interface WsSubtitle {
   vtt: string;
   srt: string;
   m3u8: string;
+}
+
+/** Une piste audio publiée (`metadata.audio_tracks[].audio_track`). */
+export interface WsAudioTrack {
+  /** Code ISO 639-1. Chaîne vide sur un média de l'encodeur historique. */
+  language: string;
+  /** `audio` pour une piste ordinaire, `description` pour une audiodescription. */
+  kind: 'audio' | 'description' | string;
+  /** Libellé à afficher dans un sélecteur ; chaîne vide si personne ne l'a saisi. */
+  label: string;
+  /** Piste jouée tant que le spectateur n'en choisit pas une autre. */
+  isDefault: boolean;
 }
 
 export interface WsMediaPlaylist {
@@ -160,6 +187,18 @@ function bool(v: unknown): boolean {
 }
 
 /**
+ * `encoding_version` : `1` ou `2`, et `null` pour tout le reste.
+ *
+ * La clé est ABSENTE quand le média ne publie rien ; on ne la traduit surtout
+ * pas en `0` ni en `1`, qui feraient passer un média illisible pour un média
+ * de l'encodeur historique.
+ */
+function encodingVersion(v: unknown): 1 | 2 | null {
+  const n = Number(v);
+  return n === 1 || n === 2 ? n : null;
+}
+
+/**
  * Déballe les listes `[{media: {...}}]` que Streamlike renvoie.
  *
  * Chaque entrée est un objet à une seule clé qui répète le nom du type. On
@@ -209,6 +248,13 @@ export function normalizeWsMedia(raw: any): WsMedia {
     lastPlaybackAt: str(g.lastplayback_date),
     is360: bool(g.is_360),
     isMultipleAudio: bool(g.is_multiple_audio),
+    audioTracks: unwrapList(meta.audio_tracks, 'audio_track').map(t => ({
+      language: str(t.language_id),
+      kind: str(t.kind) || 'audio',
+      label: str(t.label),
+      isDefault: bool(t.default),
+    })),
+    encodingVersion: encodingVersion(g.encoding_version),
     isTokenized: bool(g.is_tokenized),
     hasPassword: bool(g.has_password),
     isDownloadable: bool(g.is_downloadable),

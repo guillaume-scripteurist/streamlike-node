@@ -128,6 +128,23 @@ function customsPayload(customs: CustomField[], isPublic: boolean) {
  * Client Streamlike : crée un média encodé depuis une URL source, gère les
  * tags/playbacks, et POLLE le statut d'encodage (Streamlike n'a pas de webhook).
  * À utiliser côté serveur uniquement (détient le jeton API).
+ *
+ * ## La clé à lui donner
+ *
+ * Une clé d'API agit comme le compte qui l'a créée — avec TOUS ses droits, sauf
+ * si elle a été restreinte (API 5.30 : bloc « Droits de la clé » du back-office,
+ * ou `roles[]` sur `POST /me/keys`). Donner à chaque intégration sa propre clé,
+ * limitée aux rôles qu'elle exerce et datée d'expiration : une borne qui ne
+ * fait que déposer n'a pas besoin de pouvoir supprimer le catalogue.
+ *
+ * ## Fenêtres de maintenance
+ *
+ * Les lectures (`getMedia`, `pollEncoding`, listes) passent pendant une
+ * fenêtre annoncée ; les écritures (`createMedia`, `uploadMedia`, playlists,
+ * jetons) répondent `401 API_OFFLINE` et n'écrivent rien. C'est
+ * {@link ApiError.isOffline} — à garder en file et rejouer, pas à traiter
+ * comme une clé morte. Une liste lue pendant la fenêtre peut être COURTE sans
+ * le dire : ne jamais réconcilier un stock local dessus.
  */
 export class StreamlikeClient {
   private readonly baseUrl: string;
@@ -334,6 +351,7 @@ export class StreamlikeClient {
     if (input.type) params.set('type', input.type);
     if (input.visibility) params.set('visibility.state', input.visibility);
     if (input.encoded != null) params.set('encoded', input.encoded ? 'true' : 'false');
+    if (input.encodingVersion != null) params.set('source.encoding_version', String(input.encodingVersion));
     for (const p of input.playlistIds || []) if (p != null && p !== '') params.append('playlist_ids[]', String(p));
     for (const t of input.tagIds || []) if (t != null && t !== '') params.append('tag_ids[]', String(t));
 
@@ -563,24 +581,58 @@ export class StreamlikeClient {
    * Le média tel que l'API le rend : champs personnalisés, playlists, tags,
    * visibilité, source. La réponse n'est pas enveloppée dans `data`, à la
    * différence des collections.
+   *
+   * `fields` restreint la réponse (`fields[]=a&fields[]=b` — la forme `a,b`
+   * vaut `INVALID_FIELDS`). C'est aussi la SEULE façon d'obtenir
+   * `source.is_cold_archived` : voir {@link isColdArchived}.
    */
-  async getMedia(mediaId: string): Promise<any> {
-    return apiFetch(`${this.baseUrl}/medias/${encodeURIComponent(mediaId)}`, {
+  async getMedia(mediaId: string, options: { fields?: string[] } = {}): Promise<any> {
+    const params = new URLSearchParams();
+    for (const f of options.fields || []) if (f) params.append('fields[]', f);
+    const qs = params.toString();
+    return apiFetch(`${this.baseUrl}/medias/${encodeURIComponent(mediaId)}${qs ? `?${qs}` : ''}`, {
       method: 'GET',
       headers: this.authHeaders(),
     }, 'streamlike/getMedia');
   }
 
+  /**
+   * La source n'existe-t-elle plus que dans l'archive froide ?
+   *
+   * À demander juste avant de proposer un ré-encodage, une duplication ou un
+   * export FTP : l'opération commence alors par une RESTAURATION de 3 à 5 h,
+   * que rien ne signale sinon. `source.is_cold_archived` (API 5.31) n'est servi
+   * que sur un média nommé ET demandé dans `fields[]` — jamais dans le payload
+   * complet, jamais en listing — parce que répondre lit le stockage du média.
+   * Un serveur qui ne connaît pas encore le champ ne le rend pas : `false`.
+   */
+  async isColdArchived(mediaId: string): Promise<boolean> {
+    const media = await this.getMedia(mediaId, { fields: ['source.is_cold_archived'] });
+    return media?.source?.is_cold_archived === true;
+  }
+
   /** Lit et normalise le statut d'encodage d'un média. */
   async getEncodingStatus(mediaId: string): Promise<EncodingStatusResult> {
     const media = await this.getMedia(mediaId);
-    const status = (media?.source?.encoding_status)
+    const source = media?.source ?? {};
+    const status = source.encoding_status
       || media?.['source.encoding_status']
       || 'unknown';
     const isEncoded = Boolean(
-      media?.source?.is_encoded ?? media?.['source.is_encoded'] ?? (status === 'done'),
+      source.is_encoded ?? media?.['source.is_encoded'] ?? (status === 'done'),
     );
-    return { status, isEncoded, raw: media };
+    // Clés ABSENTES quand elles ne s'appliquent pas, jamais `null` ni `0` :
+    // `encoding_version` manque sur un média qui ne publie rien, et ce n'est
+    // pas l'encodeur historique.
+    const version = Number(source.encoding_version);
+    return {
+      status,
+      isEncoded,
+      operationRunning: source.encoding_operation_running === true,
+      restoring: source.has_operation === true,
+      encodingVersion: version === 1 || version === 2 ? version : null,
+      raw: media,
+    };
   }
 
   /** Crée un tag (idempotent côté usage) et renvoie son identifiant. */
@@ -633,12 +685,18 @@ export class StreamlikeClient {
   /**
    * Pistes audio déclarées sur un média (`GET /medias/{id}/audio-tracks`).
    *
-   * Demande l'API **5.31** : un serveur plus ancien répond 404, ce qui se lit
-   * comme « ce média n'existe pas ». `getMedia()` rend aussi
-   * `source.audio_tracks` depuis la 5.37, en lecture seule et sur un média à
-   * la fois. Le drapeau `is_multiple_audio` de `/ws/media`, lui, existe depuis
-   * bien plus longtemps : pour savoir simplement s'il y a plusieurs pistes,
-   * c'est la question la moins chère.
+   * API **5.30** (en production depuis le 11 septembre 2026 — les numéros
+   * 5.31 à 5.57 que cette lib a cités n'ont jamais atteint un serveur, tout
+   * est sorti en une fois). `getMedia()` rend aussi `source.audio_tracks`, en
+   * lecture seule et sur un média à la fois ; côté webservices,
+   * `WsMedia.audioTracks` porte la même liste sans jeton. Le drapeau
+   * `is_multiple_audio`, lui, existe depuis bien plus longtemps : pour savoir
+   * simplement s'il y a plusieurs pistes, c'est la question la moins chère.
+   *
+   * Une langue s'adresse par jeton : le code ISO 639-1 nu, ou suffixé `-ad`
+   * pour l'audiodescription (`-cc` pour les sous-titres pour sourds).
+   *
+   * Contrairement au reste de l'API, cette réponse ENVOIE ses `null`.
    */
   async getAudioTracks(mediaId: string): Promise<any> {
     return apiFetch(`${this.baseUrl}/medias/${encodeURIComponent(mediaId)}/audio-tracks`, {
@@ -706,11 +764,18 @@ export class StreamlikeClient {
         }
         if (update.status === 'done' || update.status === 'error') { stopped = true; return; }
       } catch (err) {
-        try { onUpdate({ status: 'polling_error', isEncoded: false, raw: { error: (err as Error).message } }); } catch { /* noop */ }
+        try {
+          onUpdate({
+            status: 'polling_error', isEncoded: false, operationRunning: false, restoring: false,
+            encodingVersion: null, raw: { error: (err as Error).message },
+          });
+        } catch { /* noop */ }
       }
       if (Date.now() - startedAt > timeoutMs) {
         stopped = true;
-        try { onUpdate({ status: 'timeout', isEncoded: false, raw: {} }); } catch { /* noop */ }
+        try {
+          onUpdate({ status: 'timeout', isEncoded: false, operationRunning: false, restoring: false, encodingVersion: null, raw: {} });
+        } catch { /* noop */ }
         return;
       }
       if (!stopped) timer = setTimeout(tick, intervalMs);

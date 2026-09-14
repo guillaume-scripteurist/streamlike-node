@@ -110,6 +110,23 @@ export function isReportableSegment(fromSec: number, toSec: number): boolean {
   return Number.isFinite(fromSec) && Number.isFinite(toSec) && toSec - fromSec >= 0.5;
 }
 
+/**
+ * Un rapport d'analyse VIDE est le tableau `[]`, pas un objet.
+ *
+ * `response.data[companyId]` jette donc sur une période sans lecture, et
+ * `Object.keys` rend `[]` pour les deux formes — d'où ce test explicite. Les
+ * autres habitudes des rapports : les CLÉS sont les valeurs (on itère sur des
+ * identifiants de compte, des dates, des codes pays) ; un trou est une clé
+ * absente, jamais un `0` ; et `aggregation` change la forme, pas seulement le
+ * regroupement.
+ */
+export function isEmptyReport(body: unknown): boolean {
+  const data = body && typeof body === 'object' && 'data' in (body as any) ? (body as any).data : body;
+  if (data == null) return true;
+  if (Array.isArray(data)) return data.length === 0;
+  return typeof data === 'object' && Object.keys(data).length === 0;
+}
+
 /** Plage de dates d'une requête d'analyse. ISO 8601, comme partout dans l'API. */
 export interface DateRange {
   from: string;
@@ -226,6 +243,23 @@ export class StreamlikeAnalytics {
   /** Statistiques des jetons de lecture. */
   tokenStats(range: DateRange): Promise<any> {
     return this.get(`/analytics/tokenstats/${StreamlikeAnalytics.range(range)}`, {}, 'analytics/tokenstats');
+  }
+
+  /**
+   * Ce que la facture compte : `GET /analytics/company/billable`.
+   *
+   * Deux lectures qui trompent :
+   *  - `data.catalog.{date}.duration_total` est en **heures pondérées** depuis
+   *    l'API 5.30 (la même unité que `catalog_limit`), plus en secondes. Les
+   *    onze durées brutes à côté restent en secondes : `duration_total` n'est
+   *    délibérément ni leur somme, ni dans leur unité. Un graphe bâti avant
+   *    5.30 chute de trois ordres de grandeur sans lever d'erreur ;
+   *  - `data.transfer` est un cumul : additionner les semaines compte plusieurs
+   *    fois les mêmes octets.
+   */
+  billable(): Promise<any> {
+    // Pas de période : toujours du début du contrat à maintenant, par semaines.
+    return this.get('/analytics/company/billable', {}, 'analytics/billable');
   }
 
   /** Consommation : transfert, stockage, encodage, équivalent CO₂. */

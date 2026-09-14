@@ -221,6 +221,12 @@ export interface ListMediasInput {
   visibility?: MediaVisibility;
   /** Ne garder que les médias encodés (donc réellement diffusables). */
   encoded?: boolean;
+  /**
+   * `1` ou `2` : ne garder que les médias publiés par cet encodeur
+   * (`source.encoding_version`, API 5.30). Un média qui ne publie rien n'est
+   * rendu par aucune des deux valeurs.
+   */
+  encodingVersion?: 1 | 2;
 }
 
 export interface ListMediasResult {
@@ -238,6 +244,23 @@ export type EncodingStatus =
 export interface EncodingStatusResult {
   status: EncodingStatus;
   isEncoded: boolean;
+  /**
+   * Une opération d'encodage est en cours — pipeline complet, piste audio ou
+   * sous-titre (`source.encoding_operation_running`, API 5.30). C'est le
+   * moment où un ré-encodage, un changement de source, une suppression ou une
+   * archive répondent `INVALID_MEDIA_ENCODING` : attendre plutôt qu'insister.
+   */
+  operationRunning: boolean;
+  /**
+   * La source revient de l'archive froide (`source.has_operation`, API 5.31).
+   * Compter 3 à 5 heures ; le média n'est ni cassé ni bloqué, il attend.
+   */
+  restoring: boolean;
+  /**
+   * Encodeur des fichiers servis aujourd'hui, `null` tant que rien n'est publié.
+   * Voir `WsMedia.encodingVersion` pour la règle de lecture.
+   */
+  encodingVersion: 1 | 2 | null;
   raw: Record<string, unknown>;
 }
 

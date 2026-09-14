@@ -27,7 +27,7 @@ construit le paquet. Rien à faire de plus.
 | `StreamlikeClient` | **Écriture.** Médias (`createMedia` depuis une URL, `uploadMedia` en multipart, `getMedia`, `setMediaVisibility`), playlists, vues d'organisation, tags, pistes audio, jetons de lecture, sondage d'encodage. |
 | `StreamlikeWebservices` | **Lecture.** Les 15 services `/ws/*` : playlists, médias, similaires, reprise, lectures en cours, votes, langues, pays. Réponses aplaties et typées. |
 | `MediatechUploadClient` | `signUpload` / `completeUpload` / `refreshDownloadUrl` — fabrique le « ticket » que le navigateur utilise pour pousser ses octets vers GCS. |
-| `StreamlikeAnalytics` | Les chiffres de la console : lectures, engagement, géographie, matériel, consommation. |
+| `StreamlikeAnalytics` | Les chiffres de la console : lectures, engagement, géographie, matériel, consommation, facturable. `isEmptyReport()` pour ne pas jeter sur une période vide. |
 | `playability` / `isEmbeddable` | Ce média se lira-t-il dans une iframe nue ? Se tranche sur les drapeaux déjà présents dans la liste, sans appel supplémentaire. |
 | `parseManifest` / `fetchStreams` | Du manifeste au **master HLS**, pour un player natif. |
 | `playbackBeaconUrl` / `engagementBeaconUrl` | Les balises `o.k` et `eng.k`, à tirer quand on ne joue PAS avec le player Streamlike. |
@@ -144,6 +144,15 @@ fetch(engagementBeaconUrl({ mediaId, durationSec, streamType: 'hls', qualityHeig
                            playerName: 'kiosk-mobile', fromSec, toSec, userToken }));  // à chaque segment
 ```
 
+## La clé à donner à ce package
+
+Une clé d'API agit comme le compte qui l'a créée, **avec tous ses droits** —
+sauf si elle a été restreinte (API 5.30 : bloc « Droits de la clé » du
+back-office, ou `roles[]` sur `POST /me/keys`). Une clé par intégration, limitée
+aux rôles qu'elle exerce, avec une date d'expiration. Une borne qui dépose des
+vidéos n'a pas besoin de pouvoir supprimer le catalogue ; `GET /me` avec la clé
+dit ce qu'elle peut réellement faire.
+
 ## Ce que la documentation officielle dit de travers
 
 Ces comportements ont été vérifiés sur un compte réel. Ils sont la raison d'être
@@ -165,6 +174,12 @@ de ce package : chacun échoue **en silence** ou avec un message trompeur.
 | `/ws/qr` rend une image | Il rend une balise `<img>`. `fetchQrImageUrl()` en extrait le PNG. |
 | Le premier flux du manifeste est le bon | Le master adaptatif est celui dont `globalbitrate` vaut **0**. Les autres sont des rendus isolés. |
 | Plusieurs playlists : `a\|b` partout | `|` ne vaut que pour `videositemap`. `/ws/playlist` veut `playlist_id[]` répété. |
+| `forceplaylist` garde l'ordre de la playlist | Il garde **les médias classés dans au moins une playlist**, rien d'autre. Et avant les webservices 5.20, `1` le COUPAIT : cette lib l'envoie en `true`/`false`, stables des deux côtés. |
+| `encoding_version` absent = encodeur historique | Absent = **le média ne publie rien** (jamais encodé, live, premier encodage en cours). `WsMedia.encodingVersion` rend `null`, pas `1`. |
+| Un 401 = clé morte | Pendant une fenêtre de maintenance, les ÉCRITURES répondent `401 API_OFFLINE` et les lectures passent (API 5.30). `ApiError.isOffline` : garder la file, rejouer plus tard — tout autre 401 est bien une clé morte. |
+| Un rapport d'analyse vide est `{}` | C'est `[]`. `data[companyId]` jette ; `isEmptyReport()` teste les deux formes. |
+| `duration_total` du facturable est en secondes | En **heures pondérées** depuis l'API 5.30, l'unité de `catalog_limit`. Les durées brutes à côté restent en secondes. |
+| `source.is_cold_archived` se lit dans la fiche | Servi **seulement** sur `GET /medias/{id}` avec `fields[]=source.is_cold_archived` (API 5.31). `isColdArchived()` fait l'appel ; à poser avant tout ré-encodage, duplication ou export — la restauration prend 3 à 5 h. |
 
 Champs personnalisés : les noms sont normalisés en minuscules, parce que
 Streamlike les traite ainsi — un `Duree` créé à la main dans le back-office doit

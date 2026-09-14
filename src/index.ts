@@ -21,6 +21,7 @@ export {
   playbackBeaconUrl,
   engagementBeaconUrl,
   isReportableSegment,
+  isEmptyReport,
   StreamlikeAnalytics,
 } from './analytics';
 export type {

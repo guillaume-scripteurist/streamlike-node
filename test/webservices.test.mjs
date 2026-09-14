@@ -28,6 +28,8 @@ import {
   isReportableSegment,
   videoSitemapUrl,
   podcastUrl,
+  ApiError,
+  isEmptyReport,
 } from '../dist/index.js';
 
 /** Un média minimal au format de la plateforme. */
@@ -192,4 +194,72 @@ test('le sitemap joint les playlists par | et le podcast ignore le reste', () =>
   const podcast = new URL(podcastUrl({ playlistId: 'p1', language: 'fr' }));
   assert.equal(podcast.searchParams.get('playlist_id'), 'p1');
   assert.equal(podcast.searchParams.get('pagesize'), null);
+});
+
+test('forceplaylist part en mots, jamais en chiffres', async () => {
+  // Avant les webservices 5.20, `1` COUPAIT le filtre et `0` l'activait ; les
+  // mots ont toujours voulu dire ce qu'ils disent. Envoyer `true`/`false` est
+  // la seule forme stable des deux côtés de la mise à jour.
+  const { fake, calls } = withFetch({ playlist: { metadata: { size: '0' }, medias: [] } });
+  const ws = new StreamlikeWebservices({ fetch: fake, companyId: 'c1' });
+  await ws.getPlaylist({ forcePlaylist: true });
+  assert.equal(new URL(calls[0]).searchParams.get('forceplaylist'), 'true');
+  await ws.getPlaylist({ forcePlaylist: false });
+  assert.equal(new URL(calls[1]).searchParams.get('forceplaylist'), 'false');
+  await ws.getPlaylist({});
+  assert.equal(new URL(calls[2]).searchParams.get('forceplaylist'), null);
+});
+
+test('encoding_version filtre la liste et se lit sans inventer de legacy', async () => {
+  const { fake, calls } = withFetch({
+    playlist: {
+      metadata: { size: '3' },
+      medias: [
+        { media: mediaJson({ media_id: 'v2', encoding_version: 2 }) },
+        { media: mediaJson({ media_id: 'v1', encoding_version: '1' }) },
+        // Pas de clé : le média ne publie rien. Ce n'est PAS l'encodeur historique.
+        { media: mediaJson({ media_id: 'none' }) },
+      ],
+    },
+  });
+  const ws = new StreamlikeWebservices({ fetch: fake, companyId: 'c1' });
+  const page = await ws.getPlaylist({ encodingVersion: 2 });
+  assert.equal(new URL(calls[0]).searchParams.get('encoding_version'), '2');
+  assert.deepEqual(page.medias.map(m => m.encodingVersion), [2, 1, null]);
+});
+
+test('les pistes audio sont déballées, et absentes = liste vide', async () => {
+  const raw = mediaJson();
+  raw.metadata.audio_tracks = [
+    { audio_track: { language_id: 'fr', kind: 'audio', label: 'Français', default: true } },
+    { audio_track: { language_id: 'fr', kind: 'description', default: '0' } },
+  ];
+  const { fake } = withFetch({ media: raw });
+  const ws = new StreamlikeWebservices({ fetch: fake });
+  const media = await ws.getMedia({ mediaId: 'abc123' });
+  assert.deepEqual(media.audioTracks, [
+    { language: 'fr', kind: 'audio', label: 'Français', isDefault: true },
+    { language: 'fr', kind: 'description', label: '', isDefault: false },
+  ]);
+
+  const { fake: bare } = withFetch({ media: mediaJson() });
+  const plain = await new StreamlikeWebservices({ fetch: bare }).getMedia({ mediaId: 'abc123' });
+  assert.deepEqual(plain.audioTracks, []);
+});
+
+test('API_OFFLINE est le seul 401 qui vaille un réessai', () => {
+  const offline = new ApiError('x', 401, 'HTTP 401', { message: 'API_OFFLINE' });
+  const badKey = new ApiError('x', 401, 'HTTP 401', { message: 'INVALID_TOKEN' });
+  const throttled = new ApiError('x', 429, 'HTTP 429', {}, 30);
+  assert.equal(offline.isOffline, true);
+  assert.equal(offline.isRetryable, true);
+  assert.equal(badKey.isOffline, false);
+  assert.equal(badKey.isRetryable, false);
+  assert.equal(throttled.isRetryable, true);
+});
+
+test('un rapport vide est un tableau, pas un objet', () => {
+  assert.equal(isEmptyReport({ data: [] }), true);
+  assert.equal(isEmptyReport([]), true);
+  assert.equal(isEmptyReport({ data: { c1: { '2026-09-01': { playback: 3 } } } }), false);
 });
