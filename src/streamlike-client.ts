@@ -16,6 +16,7 @@ import type {
   PollEncodingOptions,
   PollHandle,
   ViewRow,
+  CreateViewInput,
 } from './types';
 
 /**
@@ -197,11 +198,18 @@ export class StreamlikeClient {
     if (input.sourceUrl) encodeSource.media_url = input.sourceUrl;
     if (input.description) payload.description = input.description;
 
-    if (input.pseudo || input.alias) {
-      payload.customs = [
-        ...(input.pseudo ? [{ name: 'pseudo', value: input.pseudo, public: true }] : []),
-        ...(input.alias ? [{ name: 'alias', value: input.alias, public: true }] : []),
-      ];
+    const customs: CustomField[] = [];
+    if (input.customs && Array.isArray(input.customs)) {
+      customs.push(...input.customs);
+    }
+    if (input.pseudo && !customs.some(c => c.name.toLowerCase() === 'pseudo')) {
+      customs.push({ name: 'pseudo', value: input.pseudo, public: true });
+    }
+    if (input.alias && !customs.some(c => c.name.toLowerCase() === 'alias')) {
+      customs.push({ name: 'alias', value: input.alias, public: true });
+    }
+    if (customs.length) {
+      payload.customs = customsPayload(customs, true);
     }
     const tagIds = (input.tagIds || []).filter(t => t != null);
     if (tagIds.length) payload.tag_ids = tagIds;
@@ -291,11 +299,18 @@ export class StreamlikeClient {
       visibility: { state: 'online' },
     };
     if (input.description) resource.description = input.description;
-    if (input.pseudo || input.alias) {
-      resource.customs = [
-        ...(input.pseudo ? [{ name: 'pseudo', value: input.pseudo, public: true }] : []),
-        ...(input.alias ? [{ name: 'alias', value: input.alias, public: true }] : []),
-      ];
+    const customs: CustomField[] = [];
+    if (input.customs && Array.isArray(input.customs)) {
+      customs.push(...input.customs);
+    }
+    if (input.pseudo && !customs.some(c => c.name.toLowerCase() === 'pseudo')) {
+      customs.push({ name: 'pseudo', value: input.pseudo, public: true });
+    }
+    if (input.alias && !customs.some(c => c.name.toLowerCase() === 'alias')) {
+      customs.push({ name: 'alias', value: input.alias, public: true });
+    }
+    if (customs.length) {
+      resource.customs = customsPayload(customs, true);
     }
     const tags = (input.tagIds || []).filter(t => t != null && t !== '').map(String);
     if (tags.length) resource.tag_ids = tags;
@@ -539,13 +554,71 @@ export class StreamlikeClient {
   }
 
   /**
-   * Édite les champs personnalisés d'un média (pseudo et alias).
+   * Creates an organization view.
+   *
+   * @param input - View attributes (name, description, type, initial playlists)
+   * @returns The created view ID or null
    */
-  async updateMediaCustoms(mediaId: string, pseudo: string, alias: string): Promise<any> {
-    const customs = [];
-    if (pseudo != null) customs.push({ name: 'pseudo', value: pseudo,public:true });
-    if (alias != null) customs.push({ name: 'alias', value: alias,public:true });
-    
+  async createView(input: CreateViewInput): Promise<string | null> {
+    const payload: Record<string, unknown> = {
+      name: input.name,
+      type: input.type || 'playlist',
+    };
+    if (input.description) payload.description = input.description;
+    if (input.playlists?.length) {
+      payload.playlists = input.playlists.map((id, index) => ({ id: String(id), position: index + 1 }));
+    }
+    const created: any = await apiFetch(
+      `${this.baseUrl}/organization/views`,
+      {
+        method: 'POST',
+        headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      'streamlike/createView',
+    );
+    const id = created?.id ?? created?.view_id ?? null;
+    return id == null ? null : String(id);
+  }
+
+  /**
+   * Deletes an organization view by ID.
+   *
+   * @param viewId - Identifier of the view to delete
+   */
+  async deleteView(viewId: string): Promise<void> {
+    await apiFetch(
+      `${this.baseUrl}/organization/views/${encodeURIComponent(viewId)}`,
+      { method: 'DELETE', headers: this.authHeaders() },
+      'streamlike/deleteView',
+    );
+  }
+
+  /**
+   * Updates custom fields on a media.
+   * Accepts individual pseudo/alias strings or an object with custom fields.
+   */
+  async updateMediaCustoms(
+    mediaId: string,
+    pseudoOrOptions?: string | { pseudo?: string; alias?: string; customs?: CustomField[] },
+    alias?: string,
+  ): Promise<any> {
+    const customs: CustomField[] = [];
+    if (typeof pseudoOrOptions === 'object' && pseudoOrOptions !== null) {
+      if (pseudoOrOptions.customs && Array.isArray(pseudoOrOptions.customs)) {
+        customs.push(...pseudoOrOptions.customs);
+      }
+      if (pseudoOrOptions.pseudo && !customs.some(c => c.name.toLowerCase() === 'pseudo')) {
+        customs.push({ name: 'pseudo', value: pseudoOrOptions.pseudo, public: true });
+      }
+      if (pseudoOrOptions.alias && !customs.some(c => c.name.toLowerCase() === 'alias')) {
+        customs.push({ name: 'alias', value: pseudoOrOptions.alias, public: true });
+      }
+    } else {
+      if (pseudoOrOptions != null) customs.push({ name: 'pseudo', value: String(pseudoOrOptions), public: true });
+      if (alias != null) customs.push({ name: 'alias', value: String(alias), public: true });
+    }
+
     return apiFetch(
       `${this.baseUrl}/medias/${encodeURIComponent(mediaId)}`,
       {

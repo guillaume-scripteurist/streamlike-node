@@ -173,6 +173,8 @@ export interface CreateMediaInput {
   pseudo?: string;
   /** Champ personnalisé ALIAS Streamlike */
   alias?: string;
+  /** Champs personnalisés arbitraires (ex. session_id, question_id, etc.) */
+  customs?: CustomField[];
 }
 
 export interface UploadMediaInput {
@@ -194,6 +196,15 @@ export interface UploadMediaInput {
   pseudo?: string;
   /** Champ personnalisé ALIAS Streamlike */
   alias?: string;
+  /** Champs personnalisés arbitraires (ex. session_id, question_id, etc.) */
+  customs?: CustomField[];
+}
+
+export interface CreateViewInput {
+  name: string;
+  description?: string;
+  type?: string;
+  playlists?: Array<string | number>;
 }
 
 /**
