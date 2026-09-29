@@ -1,6 +1,6 @@
 {
   "name": "@scripteurist/streamlike-node",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Node server SDK for Streamlike: REST API (write), /ws/* webservices (read), analytics, playback resolution, plus Mediatech secure upload.",
   "type": "module",
   "sideEffects": false,
