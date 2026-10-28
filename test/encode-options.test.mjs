@@ -127,6 +127,29 @@ test('createMedia : le raccourci historique `speechToText: "fr"` marche toujours
   });
 });
 
+test('createMedia : callbacks partent dans source.encode.callbacks', async () => {
+  const original = globalThis.fetch;
+  let payload = null;
+  globalThis.fetch = async (url, options) => {
+    payload = JSON.parse(options.body);
+    return new Response('{}', { status: 201, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const client = new StreamlikeClient({ apiToken: 'jeton-de-test' });
+    await client.createMedia({
+      name: 'n',
+      permalink: 'p',
+      sourceUrl: 'https://exemple/v.mp4',
+      callbacks: ['https://hub.example/api/webhooks/streamlike/rec-1/secret'],
+    });
+  } finally {
+    globalThis.fetch = original;
+  }
+  assert.deepEqual(payload.source.encode.callbacks, [
+    'https://hub.example/api/webhooks/streamlike/rec-1/secret',
+  ]);
+});
+
 /**
  * La forme du corps de `createMedia`, qui a valu un `400` en production.
  *

@@ -112,6 +112,7 @@ function resolveEncode(...layers: Array<EncodeOptions | undefined>): ResolvedEnc
     if (layer.speechToTextLanguage) out.speechToTextLanguage = String(layer.speechToTextLanguage).trim();
     if (layer.automaticTranslation != null) out.automaticTranslation = !!layer.automaticTranslation;
     if (layer.encodingPassthru != null) out.encodingPassthru = !!layer.encodingPassthru;
+    if (layer.callbacks) out.callbacks = [...layer.callbacks];
   }
   return out;
 }
@@ -239,11 +240,12 @@ export class StreamlikeClient {
     // comportement que `server.js` connaît depuis toujours pour les médias
     // encodés depuis une URL.
     const legacyLang = typeof input.speechToText === 'string' ? input.speechToText.trim() : '';
-    const wantsEncodeKeys = !!legacyLang || !!input.encode || !!this.config.encode;
+    const wantsEncodeKeys = !!legacyLang || !!input.encode || !!this.config.encode || !!input.callbacks?.length;
     if (wantsEncodeKeys) {
       const encode = resolveEncode(
         this.config.encode,
         legacyLang ? { speechToText: true, speechToTextLanguage: legacyLang } : undefined,
+        input.callbacks?.length ? { callbacks: input.callbacks } : undefined,
         input.encode,
       );
       if (encode.speechToText) {
@@ -263,6 +265,7 @@ export class StreamlikeClient {
       // vidéos encodées depuis une URL attendaient un ré-encodage complet sans
       // que rien ne le signale.
       if (encode.encodingPassthru) encodeSource.encoding_passthru = true;
+      if (encode.callbacks?.length) encodeSource.callbacks = encode.callbacks;
     }
 
     // Émis seulement s'il y a quelque chose dedans : un `source: {}` serait un
@@ -329,10 +332,19 @@ export class StreamlikeClient {
 
     // Réglages d'encodage. Ils étaient en dur ici : toute borne installée
     // produisait des sous-titres français, quelle que soit la langue parlée.
-    const encode = resolveEncode(this.config.encode, input.encode);
+    const encode = resolveEncode(
+      this.config.encode,
+      input.callbacks?.length ? { callbacks: input.callbacks } : undefined,
+      input.encode,
+    );
     // Passthru : la source est déjà dans un format lisible tel quel, inutile
     // de la ré-encoder — accélère la disponibilité de la vidéo après upload.
     if (encode.encodingPassthru) body.append('source[encode][encoding_passthru]', '1');
+    if (encode.callbacks?.length) {
+      for (const cb of encode.callbacks) {
+        body.append('source[encode][callbacks][]', cb);
+      }
+    }
     if (encode.speechToText) {
       body.append('source[encode][speech_to_text][type]', 'subtitle_transcript');
       body.append('source[encode][speech_to_text][automatic_translation]', String(encode.automaticTranslation));

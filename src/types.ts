@@ -51,6 +51,11 @@ export interface EncodeOptions {
    * respect strict des profils du compte. Défaut `true`.
    */
   encodingPassthru?: boolean;
+  /**
+   * URLs appelées une fois l'encodage terminé ou en cas d'échec (`callbacks`).
+   * Répété dans l'API sous `source[encode][callbacks][]`.
+   */
+  callbacks?: string[];
 }
 
 /**
@@ -62,6 +67,7 @@ export interface ResolvedEncodeOptions {
   speechToTextLanguage: string;
   automaticTranslation: boolean;
   encodingPassthru: boolean;
+  callbacks?: string[];
 }
 
 /** Champ personnalisé d'une playlist ou d'un média. */
@@ -169,6 +175,8 @@ export interface CreateMediaInput {
   speechToText?: string;
   /** Réglages d'encodage pour cet appel. Priment sur ceux du client. */
   encode?: EncodeOptions;
+  /** Raccourci vers `encode.callbacks` : URLs notifiées en fin d'encodage. */
+  callbacks?: string[];
   /** Champ personnalisé PSEUDO Streamlike */
   pseudo?: string;
   /** Champ personnalisé ALIAS Streamlike */
@@ -192,6 +200,8 @@ export interface UploadMediaInput {
   contentType?: string;
   /** Réglages d'encodage pour cet appel. Priment sur ceux du client. */
   encode?: EncodeOptions;
+  /** Raccourci vers `encode.callbacks` : URLs notifiées en fin d'encodage. */
+  callbacks?: string[];
   /** Champ personnalisé PSEUDO Streamlike */
   pseudo?: string;
   /** Champ personnalisé ALIAS Streamlike */
